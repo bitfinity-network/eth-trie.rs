@@ -8,8 +8,8 @@ mod trie_tests {
     use crate::trie::{EthTrie, Trie, TrieMut};
 
     fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         for (k, v) in data.into_iter() {
             trie.insert(k, v).unwrap();
         }
@@ -549,8 +549,8 @@ mod trie_tests {
     // - https://github.com/ethereum/py-trie/blob/master/tests/test_proof.py
     #[test]
     fn test_proof_basic() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"doe", b"reindeer").unwrap();
         trie.insert(b"dog", b"puppy").unwrap();
         trie.insert(b"dogglesworth", b"cat").unwrap();
@@ -609,8 +609,8 @@ mod trie_tests {
 
     #[test]
     fn test_proof_random() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         let mut rng = rand::thread_rng();
         let mut keys = vec![];
         for _ in 0..100 {
@@ -633,8 +633,8 @@ mod trie_tests {
 
     #[test]
     fn test_proof_empty_trie() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.commit().unwrap();
         let proof = trie.get_proof(b"not-exist").unwrap();
         assert_eq!(proof.len(), 0);
@@ -642,8 +642,8 @@ mod trie_tests {
 
     #[test]
     fn test_proof_one_element() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(Arc::clone(&memdb));
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"k", b"v").unwrap();
         let root = trie.commit().unwrap();
         let proof = trie.get_proof(b"k").unwrap();

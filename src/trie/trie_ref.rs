@@ -18,7 +18,7 @@ pub struct TrieRef<C, GP, R, D: DB>
     cache: C,
     passing_keys: GP,
     gen_keys: GP,
-    phantom: std::marker::PhantomData<D>,
+    phantom_d: std::marker::PhantomData<D>,
 }
 
 impl <C, GP, R, D: DB> TrieRef<C, GP, R, D> {
@@ -30,7 +30,7 @@ impl <C, GP, R, D: DB> TrieRef<C, GP, R, D> {
             cache,
             passing_keys,
             gen_keys,
-            phantom: std::marker::PhantomData,
+            phantom_d: std::marker::PhantomData,
         }
     }
 }

@@ -1,58 +1,53 @@
-use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc}};
-
+use hashbrown::HashMap;
 use keccak_hash::H256;
-use parking_lot::RwLock;
 
 use crate::{MemDBError, DB};
 
 /// A database that stores a fixed number of versions of the data.
 pub struct VersionedDB {
-    current_version: AtomicU64,
+    current_version: u64,
     version_size: u64,
-    storage: Arc<RwLock<HashMap<H256, Vec<u8>>>>,
-    deleted_at_version: Arc<RwLock<HashMap<H256, u64>>>,
+    storage: HashMap<H256, Vec<u8>>,
+    deleted_at_version: HashMap<H256, u64>,
 }
 
 impl VersionedDB {
     /// Create a new versioned database with the given version size.
     pub fn new(version_size: u64) -> Self {
         VersionedDB {
-            current_version: AtomicU64::new(0),
+            current_version: 0,
             version_size,
-            storage: Arc::new(RwLock::new(HashMap::new())),
-            deleted_at_version: Arc::new(RwLock::new(HashMap::new())),
+            storage: HashMap::new(),
+            deleted_at_version: HashMap::new(),
         }
     }
 
     /// Commit the current version and remove all data that is older than the current version minus the version size.
-    pub fn commit_version(&self, new_version: Option<u64>) {
-        let mut storage = self.storage.write();
-        let mut deleted_at_version = self.deleted_at_version.write();
+    pub fn commit_version(&mut self, new_version: Option<u64>) {
+        
         let mut deleted_keys = Vec::new();
 
-        let current_version = if let Some(new_version) = new_version {
-            self.current_version.store(new_version, Ordering::Relaxed);
+        self.current_version = if let Some(new_version) = new_version {
             new_version
         } else {
-            let add = 1;
-            self.current_version.fetch_add(add, Ordering::Relaxed) + add
+            self.current_version + 1
         };
 
-        for (key, version) in deleted_at_version.iter() {
-            if (*version + self.version_size) < current_version {
-                storage.remove(key);
+        for (key, version) in self.deleted_at_version.iter() {
+            if (*version + self.version_size) < self.current_version {
+                self.storage.remove(key);
                 deleted_keys.push(*key);
             }
         }
 
         for key in deleted_keys {
-            deleted_at_version.remove(&key);
+            self.deleted_at_version.remove(&key);
         }
     }
 
     // returns the current version
     pub fn get_version(&self) -> u64 {
-        self.current_version.load(Ordering::Relaxed)
+        self.current_version
     }
 
     // returns the number of versions stored
@@ -65,29 +60,27 @@ impl DB for VersionedDB {
     type Error = MemDBError;
 
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
-        let storage = self.storage.read();
-        Ok(storage.get(key).cloned())
+        Ok(self.storage.get(key).cloned())
     }
 
-    fn insert(&self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
-        let mut storage = self.storage.write();
-        if let Some(_) = storage.insert(key.clone(), value) {
-            self.deleted_at_version.write().remove(&key);
+    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
+        if let Some(_) = self.storage.insert(key.clone(), value) {
+            self.deleted_at_version.remove(&key);
         }
         Ok(())
     }
 
-    fn remove(&self, key: &H256) -> Result<(), Self::Error> {
-        self.deleted_at_version.write().insert(*key, self.current_version.load(Ordering::Relaxed));
+    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
+        self.deleted_at_version.insert(*key, self.current_version);
         Ok(())
     }
 
     fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.storage.try_read().unwrap().len())
+        Ok(self.storage.len())
     }
 
     fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.storage.try_read().unwrap().is_empty())
+        Ok(self.storage.is_empty())
     }
 
 }
@@ -102,7 +95,7 @@ mod test {
     // Test that entries are not deleted before the version is committed
     #[test]
     fn test_versioned_db() {
-        let db = VersionedDB::new(10);
+        let mut db = VersionedDB::new(10);
         assert_eq!(db.get_version(), 0);
         assert_eq!(db.get_version_size(), 10);
 
@@ -133,7 +126,7 @@ mod test {
 
     #[test]
     fn test_versioned_db_should_enter_delete_enter_fine() {
-        let db = VersionedDB::new(1);
+        let mut db = VersionedDB::new(1);
 
         let key = H256::zero();
         let value = vec![1, 2, 3, 4];
@@ -155,9 +148,9 @@ mod test {
 
     #[test]
     fn versioned_db_should_keep_fixed_number_of_versions() {
-        let db = Arc::new(VersionedDB::new(10));
+        let mut db = VersionedDB::new(10);
 
-        let mut trie = EthTrie::new(db.clone());
+        let mut trie = EthTrie::new_mut(&mut db);
         trie.insert(b"test", b"test").unwrap();
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
 
@@ -165,7 +158,7 @@ mod test {
         let root_zero = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new(db.clone()).at_root(root_zero);
+        let mut trie = EthTrie::new_mut(&mut db).at_root(root_zero);
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
         trie.remove(b"test").unwrap();
 
@@ -173,7 +166,7 @@ mod test {
         let root_one = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new(db.clone()).at_root(root_one);
+        let mut trie = EthTrie::new_mut(&mut db).at_root(root_one);
         assert_eq!(None, trie.get(b"test").unwrap());
         trie.insert(b"test", b"test_2").unwrap();
 
@@ -181,27 +174,27 @@ mod test {
         let root_two = trie.commit().unwrap();
         db.commit_version(None);
 
-        let trie = EthTrie::new(db.clone()).at_root(root_zero);
+        let trie = EthTrie::new(&db).at_root(root_zero);
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
 
-        let trie = EthTrie::new(db.clone()).at_root(root_two);
+        let trie = EthTrie::new(&db).at_root(root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
         db.commit_version(Some(12));
 
         // This should have been removed
-        let trie = EthTrie::new(db.clone()).at_root(root_zero);
+        let trie = EthTrie::new(&db).at_root(root_zero);
         assert!(trie.get(b"test").is_err());
 
-        let trie = EthTrie::new(db.clone()).at_root(root_one);
+        let trie = EthTrie::new(&db).at_root(root_one);
         assert_eq!(None, trie.get(b"test").unwrap());
 
-        let trie = EthTrie::new(db.clone()).at_root(root_two);
+        let trie = EthTrie::new(&db).at_root(root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
         db.commit_version(Some(100));
       
-        let trie = EthTrie::new(db.clone()).at_root(root_two);
+        let trie = EthTrie::new(&db).at_root(root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
     }

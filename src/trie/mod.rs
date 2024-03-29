@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::borrow::{Borrow, BorrowMut};
 
 use ethereum_types::H256;
 use hashbrown::{HashMap, HashSet};
@@ -66,19 +66,18 @@ pub trait TrieMut<D: DB> {
 }
 
 #[derive(Debug)]
-pub struct EthTrie<D>
-where
-    D: DB,
+pub struct EthTrie<R, D: DB>
 {
     root: Node,
     root_hash: H256,
 
-    db: Arc<D>,
+    db: R,
 
     // The batch of pending new nodes to write
     cache: HashMap<H256, Vec<u8>>,
     passing_keys: HashSet<H256>,
     gen_keys: HashSet<H256>,
+    phantom_d: std::marker::PhantomData<D>,
 }
 
 enum EncodedNode {
@@ -225,26 +224,69 @@ where
     }
 }
 
-impl<D> EthTrie<D>
-where
-    D: DB,
-{
+impl<D: DB> EthTrie<&D, D> {
 
-    pub fn new(db: Arc<D>) -> Self {
-        Self {
-            root: Node::Empty,
-            root_hash: KECCAK_NULL_RLP.as_fixed_bytes().into(),
-
-            cache: HashMap::new(),
-            passing_keys: HashSet::new(),
-            gen_keys: HashSet::new(),
-
-            db,
-        }
+pub fn new(db: &D) -> EthTrie<&D, D> {
+    EthTrie {
+        root: Node::Empty,
+        root_hash: KECCAK_NULL_RLP.as_fixed_bytes().into(),
+        
+        cache: HashMap::new(),
+        passing_keys: HashSet::new(),
+        gen_keys: HashSet::new(),
+        
+        db,
+        phantom_d: std::marker::PhantomData,
     }
+}
+pub fn new_at_root(db: &D, root_hash: H256) -> EthTrie<&D, D> {
+    EthTrie {
+        root: Node::from_hash(root_hash),
+        root_hash,
 
-    pub fn new_at_root(db: Arc<D>, root_hash: H256) -> Self {
-        Self {
+        cache: HashMap::new(),
+        passing_keys: HashSet::new(),
+        gen_keys: HashSet::new(),
+
+        db,
+        phantom_d: std::marker::PhantomData,
+    }
+}
+
+pub fn at_root(&self, root_hash: H256) -> Self {
+    Self {
+        root: Node::from_hash(root_hash),
+        root_hash,
+
+        cache: HashMap::new(),
+        passing_keys: HashSet::new(),
+        gen_keys: HashSet::new(),
+
+        db: self.db,
+        phantom_d: std::marker::PhantomData,
+    }
+}
+
+}
+
+impl<D: DB> EthTrie<&mut D, D> {
+
+pub fn new_mut(db: &mut D) -> EthTrie<&mut D, D> {
+    EthTrie {
+        root: Node::Empty,
+        root_hash: KECCAK_NULL_RLP.as_fixed_bytes().into(),
+        
+        cache: HashMap::new(),
+        passing_keys: HashSet::new(),
+        gen_keys: HashSet::new(),
+        
+        db,
+        phantom_d: std::marker::PhantomData,
+    }
+}
+
+    pub fn new_at_root(db: &mut D, root_hash: H256) -> EthTrie<&mut D, D> {
+        EthTrie {
             root: Node::from_hash(root_hash),
             root_hash,
 
@@ -253,11 +295,12 @@ where
             gen_keys: HashSet::new(),
 
             db,
+            phantom_d: std::marker::PhantomData,
         }
     }
     
-    pub fn at_root(&self, root_hash: H256) -> Self {
-        Self {
+    pub fn at_root(&mut self, root_hash: H256) -> EthTrie<&mut D, D> {
+        EthTrie {
             root: Node::from_hash(root_hash),
             root_hash,
 
@@ -265,32 +308,31 @@ where
             passing_keys: HashSet::new(),
             gen_keys: HashSet::new(),
 
-            db: self.db.clone(),
+            db: self.db,
+            phantom_d: std::marker::PhantomData,
         }
     }
 
 }
 
-impl<D> Trie<D> for EthTrie<D>
-where
-    D: DB,
+impl<R: Borrow<D>, D: DB> Trie<D> for EthTrie<R, D>
 {
 
     fn iter(&self) -> TrieIterator<D> {
         let nodes = vec![(self.root.clone()).into()];
         TrieIterator {
-            db: self.db.as_ref(),
+            db: self.db.borrow(),
             nibble: Nibbles::from_raw(&[], false),
             nodes,
         }
     }
 
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
-        TrieOps::get(key, &self.root_hash, self.db.as_ref(), &self.root)
+        TrieOps::get(key, &self.root_hash, self.db.borrow(), &self.root)
     }
 
     fn contains(&self, key: &[u8]) -> TrieResult<bool> {
-        TrieOps::contains(key, &self.root_hash, self.db.as_ref(), &self.root)
+        TrieOps::contains(key, &self.root_hash, self.db.borrow(), &self.root)
     }
 
     fn verify_proof(
@@ -303,19 +345,16 @@ where
     }
 }
 
-impl<D> TrieMut<D> for EthTrie<D>
-where
-    D: DB,
-{
+impl<R: BorrowMut<D>, D: DB> TrieMut<D> for EthTrie<R, D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
-        let node = TrieOps::insert(key, value, &self.root_hash, self.db.as_ref(), &mut self.root, &mut self.passing_keys)?;
+        let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, &mut self.passing_keys)?;
         self.root = node;
         Ok(())
     }
 
     fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
-        let (root, res) = TrieOps::remove(key, &self.root_hash, self.db.as_ref(), &mut self.root, &mut self.passing_keys)?;
+        let (root, res) = TrieOps::remove(key, &self.root_hash, self.db.borrow_mut(), &mut self.root, &mut self.passing_keys)?;
         self.root = root;
         Ok(res)
     }
@@ -330,14 +369,14 @@ where
     }
 
     fn commit(&mut self) -> TrieResult<H256> {
-        let (root_hash, root) = TrieOps::commit(&self.root,  self.db.as_ref(), &mut self.gen_keys, &mut self.cache, &mut self.passing_keys)?;
+        let (root_hash, root) = TrieOps::commit(&self.root,  self.db.borrow_mut(), &mut self.gen_keys, &mut self.cache, &mut self.passing_keys)?;
         self.root = root;
         self.root_hash = root_hash;
         Ok(root_hash)
     }
 
     fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
-        TrieOps::get_proof(key, &self.root_hash, self.db.as_ref(), &self.root, &mut self.gen_keys, &mut self.cache)
+        TrieOps::get_proof(key, &self.root_hash, self.db.borrow_mut(), &self.root, &mut self.gen_keys, &mut self.cache)
     }
 
 }
@@ -348,12 +387,11 @@ mod tests {
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng};
     use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
 
     use ethereum_types::H256;
     use keccak_hash::KECCAK_NULL_RLP;
 
-    use super::{EthTrie, Trie, TrieMut};
+    use super::*;
     use crate::db::{MemoryDB, DB};
     use crate::errors::TrieError;
     use crate::nibbles::Nibbles;
@@ -361,15 +399,15 @@ mod tests {
 
     #[test]
     fn test_trie_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"test", b"test").unwrap();
     }
 
     #[test]
     fn test_trie_get() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"test", b"test").unwrap();
         let v = trie.get(b"test").unwrap();
 
@@ -378,18 +416,18 @@ mod tests {
 
     #[test]
     fn test_trie_get_missing() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"test", b"test").unwrap();
         let v = trie.get(b"no-val").unwrap();
 
         assert_eq!(None, v)
     }
 
-    fn corrupt_trie() -> (EthTrie<MemoryDB>, H256, H256) {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let corruptor_db = memdb.clone();
-        let mut trie = EthTrie::new(memdb);
+    fn corrupt_trie(db: &mut MemoryDB) -> (EthTrie<&mut MemoryDB, MemoryDB>, H256, H256) {
+
+        // let corruptor_db = db.clone();
+        let mut trie = EthTrie::new_mut(db);
         trie.insert(b"test1-key", b"really-long-value1-to-prevent-inlining")
             .unwrap();
         trie.insert(b"test2-key", b"really-long-value2-to-prevent-inlining")
@@ -399,9 +437,9 @@ mod tests {
         // Manually corrupt the database by removing a trie node
         // This is the hash for the leaf node for test2-key
         let node_hash_to_delete = H256::from_slice(b"\xcb\x15v%j\r\x1e\te_TvQ\x8d\x93\x80\xd1\xa2\xd1\xde\xfb\xa5\xc3hJ\x8c\x9d\xb93I-\xbd");
-        assert_ne!(corruptor_db.get(&node_hash_to_delete).unwrap(), None);
-        corruptor_db.remove(&node_hash_to_delete).unwrap();
-        assert_eq!(corruptor_db.get(&node_hash_to_delete).unwrap(), None);
+        assert_ne!(db.get(&node_hash_to_delete).unwrap(), None);
+        db.remove(&node_hash_to_delete).unwrap();
+        assert_eq!(db.get(&node_hash_to_delete).unwrap(), None);
 
         (
             trie,
@@ -413,7 +451,8 @@ mod tests {
     #[test]
     /// When a database entry is missing, get returns a MissingTrieNode error
     fn test_trie_get_corrupt() {
-        let (trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+        let mut memdb = MemoryDB::new(true);
+        let (trie, actual_root_hash, deleted_node_hash) = corrupt_trie(&mut memdb);
 
         let result = trie.get(b"test2-key");
 
@@ -437,7 +476,8 @@ mod tests {
     #[test]
     /// When a database entry is missing, delete returns a MissingTrieNode error
     fn test_trie_delete_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+        let mut memdb = MemoryDB::new(true);
+        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie(&mut memdb);
 
         let result = trie.remove(b"test2-key");
 
@@ -461,7 +501,8 @@ mod tests {
     #[test]
     /// When a database entry is missing, delete returns a MissingTrieNode error
     fn test_trie_delete_refactor_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+        let mut memdb = MemoryDB::new(true);
+        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie(&mut memdb);
 
         let result = trie.remove(b"test1-key");
 
@@ -485,7 +526,8 @@ mod tests {
     #[test]
     /// When a database entry is missing, get_proof returns a MissingTrieNode error
     fn test_trie_get_proof_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+        let mut memdb = MemoryDB::new(true);
+        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie(&mut memdb);
 
         let result = trie.get_proof(b"test2-key");
 
@@ -509,7 +551,8 @@ mod tests {
     #[test]
     /// When a database entry is missing, insert returns a MissingTrieNode error
     fn test_trie_insert_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
+        let mut memdb = MemoryDB::new(true);
+        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie(&mut memdb);
 
         let result = trie.insert(b"test2-neighbor", b"any");
 
@@ -532,8 +575,8 @@ mod tests {
 
     #[test]
     fn test_trie_random_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
 
         for _ in 0..1000 {
             let rand_str: String = thread_rng()
@@ -551,8 +594,8 @@ mod tests {
 
     #[test]
     fn test_trie_contains() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"test", b"test").unwrap();
         assert!(trie.contains(b"test").unwrap());
         assert!(!trie.contains(b"test2").unwrap());
@@ -560,8 +603,8 @@ mod tests {
 
     #[test]
     fn test_trie_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"test", b"test").unwrap();
         let removed = trie.remove(b"test").unwrap();
         assert!(removed)
@@ -569,8 +612,8 @@ mod tests {
 
     #[test]
     fn test_trie_random_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
 
         for _ in 0..1000 {
             let rand_str: String = thread_rng()
@@ -588,9 +631,9 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_six_keys() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = EthTrie::new(memdb.clone());
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(b"test", b"test").unwrap();
             trie.insert(b"test1", b"test").unwrap();
             trie.insert(b"test2", b"test").unwrap();
@@ -600,7 +643,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new(memdb).at_root(root);
+        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
         let v1 = trie.get(b"test33").unwrap();
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
@@ -611,9 +654,9 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_and_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = EthTrie::new(Arc::clone(&memdb));
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(b"test", b"test").unwrap();
             trie.insert(b"test1", b"test").unwrap();
             trie.insert(b"test2", b"test").unwrap();
@@ -623,7 +666,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new(memdb).at_root(root);
+        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
         trie.insert(b"test55", b"test55").unwrap();
         trie.commit().unwrap();
         let v = trie.get(b"test55").unwrap();
@@ -632,9 +675,9 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root = {
-            let mut trie = EthTrie::new(Arc::clone(&memdb));
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(b"test", b"test").unwrap();
             trie.insert(b"test1", b"test").unwrap();
             trie.insert(b"test2", b"test").unwrap();
@@ -644,7 +687,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new(memdb).at_root(root);
+        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
         let removed = trie.remove(b"test44").unwrap();
         assert!(removed);
         let removed = trie.remove(b"test33").unwrap();
@@ -660,15 +703,15 @@ mod tests {
         let v: ethereum_types::H256 = ethereum_types::H256::random();
 
         let root1 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = EthTrie::new(memdb);
+            let mut memdb = MemoryDB::new(true);
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
             trie.commit().unwrap()
         };
 
         let root2 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie = EthTrie::new(memdb);
+            let mut memdb = MemoryDB::new(true);
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
             trie.insert(k1.as_bytes(), v.as_bytes()).unwrap();
             trie.commit().unwrap();
@@ -677,8 +720,8 @@ mod tests {
         };
 
         let root3 = {
-            let memdb = Arc::new(MemoryDB::new(true));
-            let mut trie1 = EthTrie::new(Arc::clone(&memdb));
+            let mut memdb = MemoryDB::new(true);
+            let mut trie1 = EthTrie::new_mut(&mut memdb);
             trie1.insert(k0.as_bytes(), v.as_bytes()).unwrap();
             trie1.insert(k1.as_bytes(), v.as_bytes()).unwrap();
             trie1.commit().unwrap();
@@ -694,8 +737,8 @@ mod tests {
 
     #[test]
     fn test_delete_stale_keys_with_random_insert_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
 
         let mut rng = rand::thread_rng();
         let mut keys = vec![];
@@ -723,8 +766,8 @@ mod tests {
 
     #[test]
     fn insert_full_branch() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
 
         trie.insert(b"test", b"test").unwrap();
         trie.insert(b"test1", b"test").unwrap();
@@ -740,7 +783,7 @@ mod tests {
 
     #[test]
     fn iterator_trie() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let mut memdb = MemoryDB::new(true);
         let root1: H256;
         let mut kv = HashMap::new();
         kv.insert(b"test".to_vec(), b"test".to_vec());
@@ -752,8 +795,9 @@ mod tests {
         kv.insert(b"test2".to_vec(), b"test6".to_vec());
         kv.insert(b"test23".to_vec(), b"test7".to_vec());
         kv.insert(b"test9".to_vec(), b"test8".to_vec());
+
         {
-            let mut trie = EthTrie::new(memdb.clone());
+            let mut trie = EthTrie::new_mut(&mut memdb);
             let mut kv = kv.clone();
             kv.iter().for_each(|(k, v)| {
                 trie.insert(k, v).unwrap();
@@ -766,7 +810,7 @@ mod tests {
         }
 
         {
-            let mut trie = EthTrie::new(memdb.clone());
+            let mut trie = EthTrie::new_mut(&mut memdb);
             let mut kv2 = HashMap::new();
             kv2.insert(b"test".to_vec(), b"test11".to_vec());
             kv2.insert(b"test1".to_vec(), b"test12".to_vec());
@@ -798,7 +842,7 @@ mod tests {
             assert!(kv2.is_empty());
         }
 
-        let trie = EthTrie::new(memdb).at_root(root1);
+        let trie = EthTrie::new_mut(&mut memdb).at_root(root1);
         trie.iter()
             .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
         assert!(kv.is_empty());
@@ -806,12 +850,12 @@ mod tests {
 
     #[test]
     fn test_small_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb.clone());
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(b"key", b"val").unwrap();
         let new_root_hash = trie.commit().unwrap();
 
-        let empty_trie = EthTrie::new(memdb);
+        let mut empty_trie = EthTrie::new_mut(&mut memdb);
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"key").unwrap(), None);
 
@@ -824,8 +868,8 @@ mod tests {
 
     #[test]
     fn test_large_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb.clone());
+        let mut memdb = MemoryDB::new(true);
+        let mut trie = EthTrie::new_mut(&mut memdb);
         trie.insert(
             b"pretty-long-key",
             b"even-longer-val-to-go-more-than-32-bytes",
@@ -833,7 +877,7 @@ mod tests {
         .unwrap();
         let new_root_hash = trie.commit().unwrap();
 
-        let empty_trie = EthTrie::new(memdb);
+        let mut empty_trie = EthTrie::new_mut(&mut memdb);
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
 
@@ -849,10 +893,10 @@ mod tests {
 
     #[test]
     fn test_remove_all_from_root() {
-        let memdb = Arc::new(VersionedDB::new(10));
+        let mut memdb = VersionedDB::new(10);
 
         let root_hash_1 = {
-            let mut trie = EthTrie::new(memdb.clone());
+            let mut trie = EthTrie::new_mut(&mut memdb);
             trie.insert(b"key", b"val").unwrap();
             let root_hash = trie.commit().unwrap();
     
@@ -863,7 +907,7 @@ mod tests {
         };
 
         let root_hash_2 =  {
-            let mut trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+            let mut trie = EthTrie::new_mut(&mut memdb).at_root(root_hash_1);
 
             trie.insert(b"key", b"val_inner").unwrap();
             trie.insert(b"key2", b"val_inner").unwrap();
@@ -879,7 +923,7 @@ mod tests {
         };
 
         let _root_hash_3 =  {
-            let mut trie = EthTrie::new(memdb.clone()).at_root(root_hash_2);
+            let mut trie = EthTrie::new_mut( &mut memdb).at_root(root_hash_2);
 
             let removed = trie.remove_all().unwrap();
             assert_eq!(removed, 3);
@@ -893,12 +937,12 @@ mod tests {
         };
 
         {
-            let trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+            let trie = EthTrie::new(&mut memdb).at_root(root_hash_1);
             assert_eq!(b"val".to_vec() , trie.get(b"key").unwrap().unwrap());
 
             memdb.commit_version(Some(11));
 
-            let trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+            let trie = EthTrie::new(&mut memdb).at_root(root_hash_1);
             assert!(trie.get(b"key").is_err());
             assert_eq!(1, memdb.len().unwrap());
         };

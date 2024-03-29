@@ -144,7 +144,7 @@ impl TrieOps {
         key: &[u8],
         proof: Vec<Vec<u8>>,
     ) -> TrieResult<Option<Vec<u8>>> {
-        let proof_db = Arc::new(MemoryDB::new(true));
+        let mut proof_db = MemoryDB::new(true);
         for node_encoded in proof.into_iter() {
             let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
 
@@ -152,7 +152,7 @@ impl TrieOps {
                 proof_db.insert(hash, node_encoded).unwrap();
             }
         }
-        let trie = EthTrie::new_at_root(proof_db, root_hash);
+        let trie = EthTrie::<&MemoryDB, MemoryDB>::new_at_root(&proof_db, root_hash);
         trie.get(key).or(Err(TrieError::InvalidProof))
     }
 
@@ -520,7 +520,7 @@ impl TrieOps {
 
     pub fn commit<D: DB>(
         root: &Node,
-        db: &D,
+        db: &mut D,
         gen_keys: &mut HashSet<H256>, 
         cache: &mut HashMap<H256, Vec<u8>>,
         passing_keys: &mut HashSet<H256>,
