@@ -16,7 +16,7 @@ pub type TrieResult<T> = Result<T, TrieError>;
 const HASHED_LENGTH: usize = 32;
 
 mod ops;
-mod trie_child;
+mod trie_ref;
 
 pub trait Trie<D: DB> {
 
