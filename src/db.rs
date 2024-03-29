@@ -27,11 +27,6 @@ pub trait DB {
         while let (Some(key), Some(value)) = (keys.pop(), values.pop()) {
             self.insert(key, value)?;
         }
-        // for i in 0..keys.len() {
-        //     let key = keys[i];
-        //     let value = values[i];
-        //     self.insert(key, value)?;
-        // }
         Ok(())
     }
 

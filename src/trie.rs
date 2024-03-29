@@ -27,6 +27,10 @@ pub trait Trie<D: DB> {
     /// Removes any existing value for key from the trie.
     fn remove(&mut self, key: &[u8]) -> TrieResult<bool>;
 
+    /// Removes all existing (key, value) pairs from the trie.
+    /// Returns the number of removed pairs.
+    fn remove_all(&mut self) -> TrieResult<usize>;
+
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
     /// Returns the root hash of the trie.
     fn root_hash(&mut self) -> TrieResult<H256>;
@@ -333,6 +337,17 @@ where
             self.root = n;
             Ok(removed)
         }
+    }
+
+    /// Removes all existing (key, value) pairs from the trie.
+    /// Returns the number of removed pairs.
+    fn remove_all(&mut self) -> TrieResult<usize> {
+        let keys: Vec<_> = self.iter().map(|(k, _)| k).collect();
+        let keys_len = keys.len();
+        for key in keys {
+            self.remove(&key)?;
+        }
+        Ok(keys_len)
     }
 
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
@@ -938,6 +953,7 @@ mod tests {
     use crate::db::{MemoryDB, DB};
     use crate::errors::TrieError;
     use crate::nibbles::Nibbles;
+    use crate::VersionedDB;
 
     #[test]
     fn test_trie_insert() {
@@ -1425,5 +1441,63 @@ mod tests {
 
         // Previous trie was not modified
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
+    }
+
+    #[test]
+    fn test_remove_all_from_root() {
+        let memdb = Arc::new(VersionedDB::new(10));
+
+        let root_hash_1 = {
+            let mut trie = EthTrie::new(memdb.clone());
+            trie.insert(b"key", b"val").unwrap();
+            let root_hash = trie.commit().unwrap();
+    
+            // println!("root_hash : {:?}", root_hash);
+            // println!("memdb.len() : {}", memdb.len().unwrap());
+            assert!(memdb.len().unwrap() == 1);
+            root_hash
+        };
+
+        let root_hash_2 =  {
+            let mut trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+
+            trie.insert(b"key", b"val_inner").unwrap();
+            trie.insert(b"key2", b"val_inner").unwrap();
+            trie.insert(b"key3", b"val_inner").unwrap();
+            
+            assert_eq!(&trie.get(b"key").unwrap().unwrap(), b"val_inner");
+            let root_hash = trie.commit().unwrap();
+    
+            // println!("root_hash : {:?}", root_hash);
+            // println!("memdb.len() : {}", memdb.len().unwrap());
+            assert!(memdb.len().unwrap() == 4);
+            root_hash
+        };
+
+        let _root_hash_3 =  {
+            let mut trie = EthTrie::new(memdb.clone()).at_root(root_hash_2);
+
+            let removed = trie.remove_all().unwrap();
+            assert_eq!(removed, 3);
+
+            let root_hash = trie.commit().unwrap();
+
+            // println!("root_hash : {:?}", root_hash);
+            // println!("memdb.len() : {}", memdb.len().unwrap());
+
+            root_hash
+        };
+
+        {
+            let trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+            assert_eq!(b"val".to_vec() , trie.get(b"key").unwrap().unwrap());
+
+            memdb.commit_version(Some(11));
+
+            let trie = EthTrie::new(memdb.clone()).at_root(root_hash_1);
+            assert!(trie.get(b"key").is_err());
+            assert_eq!(1, memdb.len().unwrap());
+        };
+
     }
 }
