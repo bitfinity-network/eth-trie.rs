@@ -1,6 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use ethereum_types::H256;
+use parking_lot::RwLock;
 
 use crate::nibbles::Nibbles;
 
