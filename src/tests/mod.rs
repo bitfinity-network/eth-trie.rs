@@ -5,7 +5,7 @@ mod trie_tests {
     use std::sync::Arc;
 
     use crate::db::MemoryDB;
-    use crate::trie::{EthTrie, Trie};
+    use crate::trie::{EthTrie, Trie, TrieMut};
 
     fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
         let memdb = Arc::new(MemoryDB::new(true));
@@ -13,12 +13,12 @@ mod trie_tests {
         for (k, v) in data.into_iter() {
             trie.insert(k, v).unwrap();
         }
-        let root_hash = trie.root_hash().unwrap();
+        let root_hash = trie.commit().unwrap();
         let rs = format!("0x{}", hex::encode(root_hash));
         assert_eq!(rs.as_str(), hash);
 
         let mut trie = trie.at_root(root_hash);
-        let r2 = trie.root_hash().unwrap();
+        let r2 = trie.commit().unwrap();
         let rs2 = format!("0x{}", hex::encode(r2));
         assert_eq!(rs2.as_str(), hash);
     }
@@ -554,8 +554,8 @@ mod trie_tests {
         trie.insert(b"doe", b"reindeer").unwrap();
         trie.insert(b"dog", b"puppy").unwrap();
         trie.insert(b"dogglesworth", b"cat").unwrap();
-        let root = trie.root_hash().unwrap();
-        let r = format!("0x{}", hex::encode(trie.root_hash().unwrap()));
+        let root = trie.commit().unwrap();
+        let r = format!("0x{}", hex::encode(trie.commit().unwrap()));
         assert_eq!(
             r.as_str(),
             "0x8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3"
@@ -623,7 +623,7 @@ mod trie_tests {
         for k in keys.clone().into_iter() {
             trie.insert(&k, &k).unwrap();
         }
-        let root = trie.root_hash().unwrap();
+        let root = trie.commit().unwrap();
         for k in keys.into_iter() {
             let proof = trie.get_proof(&k).unwrap();
             let value = trie.verify_proof(root, &k, proof).unwrap().unwrap();
@@ -635,7 +635,7 @@ mod trie_tests {
     fn test_proof_empty_trie() {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
-        trie.root_hash().unwrap();
+        trie.commit().unwrap();
         let proof = trie.get_proof(b"not-exist").unwrap();
         assert_eq!(proof.len(), 0);
     }
@@ -645,7 +645,7 @@ mod trie_tests {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
         trie.insert(b"k", b"v").unwrap();
-        let root = trie.root_hash().unwrap();
+        let root = trie.commit().unwrap();
         let proof = trie.get_proof(b"k").unwrap();
         assert_eq!(proof.len(), 1);
         let value = trie.verify_proof(root, b"k", proof.clone()).unwrap();
@@ -653,7 +653,7 @@ mod trie_tests {
 
         // remove key does not affect the verify process
         trie.remove(b"k").unwrap();
-        let _root = trie.root_hash().unwrap();
+        let _root = trie.commit().unwrap();
         let value = trie.verify_proof(root, b"k", proof).unwrap();
         assert_eq!(value, Some(b"v".to_vec()));
     }

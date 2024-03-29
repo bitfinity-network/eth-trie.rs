@@ -16,13 +16,29 @@ pub type TrieResult<T> = Result<T, TrieError>;
 const HASHED_LENGTH: usize = 32;
 
 mod ops;
+mod trie_child;
 
 pub trait Trie<D: DB> {
+
+    /// Returns an iterator over the trie.
+    fn iter(&self) -> TrieIterator<D>;
+
     /// Returns the value for key stored in the trie.
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>>;
 
     /// Checks that the key is present in the trie
     fn contains(&self, key: &[u8]) -> TrieResult<bool>;
+
+    /// return value if key exists, None if key not exist, Error if proof is wrong
+    fn verify_proof(
+        &self,
+        root_hash: H256,
+        key: &[u8],
+        proof: Vec<Vec<u8>>,
+    ) -> TrieResult<Option<Vec<u8>>>;
+}
+
+pub trait TrieMut<D: DB> {
 
     /// Inserts value into trie and modifies it if it exists
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()>;
@@ -36,7 +52,7 @@ pub trait Trie<D: DB> {
 
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
     /// Returns the root hash of the trie.
-    fn root_hash(&mut self) -> TrieResult<H256>;
+    fn commit(&mut self) -> TrieResult<H256>;
 
     /// Prove constructs a merkle proof for key. The result contains all encoded nodes
     /// on the path to the value at key. The value itself is also included in the last
@@ -45,16 +61,8 @@ pub trait Trie<D: DB> {
     /// If the trie does not contain a value for key, the returned proof contains all
     /// nodes of the longest existing prefix of the key (at least the root node), ending
     /// with the node that proves the absence of the key.
-    // TODO refactor encode_raw() so that it doesn't need a &mut self
     fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>>;
 
-    /// return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
-        &self,
-        root_hash: H256,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-    ) -> TrieResult<Option<Vec<u8>>>;
 }
 
 #[derive(Debug)]
@@ -119,7 +127,7 @@ pub struct TrieIterator<'a, D>
 where
     D: DB,
 {
-    trie: &'a EthTrie<D>,
+    db: &'a D,
     nibble: Nibbles,
     nodes: Vec<TraceNode>,
 }
@@ -179,7 +187,7 @@ where
 
                     (TraceStatus::Doing, Node::Hash(ref hash_node)) => {
                         let node_hash = hash_node.hash;
-                        if let Ok(n) = TrieOps::recover_from_db(self.trie.db.as_ref(), &node_hash) {
+                        if let Ok(n) = TrieOps::recover_from_db(self.db, &node_hash) {
                             self.nodes.pop();
                             match n {
                                 Some(node) => self.nodes.push(node.into()),
@@ -221,14 +229,7 @@ impl<D> EthTrie<D>
 where
     D: DB,
 {
-    pub fn iter(&self) -> TrieIterator<D> {
-        let nodes = vec![(self.root.clone()).into()];
-        TrieIterator {
-            trie: self,
-            nibble: Nibbles::from_raw(&[], false),
-            nodes,
-        }
-    }
+
     pub fn new(db: Arc<D>) -> Self {
         Self {
             root: Node::Empty,
@@ -274,32 +275,51 @@ impl<D> Trie<D> for EthTrie<D>
 where
     D: DB,
 {
-    /// Returns the value for key stored in the trie.
+
+    fn iter(&self) -> TrieIterator<D> {
+        let nodes = vec![(self.root.clone()).into()];
+        TrieIterator {
+            db: self.db.as_ref(),
+            nibble: Nibbles::from_raw(&[], false),
+            nodes,
+        }
+    }
+
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
         TrieOps::get(key, &self.root_hash, self.db.as_ref(), &self.root)
     }
 
-    /// Checks that the key is present in the trie
     fn contains(&self, key: &[u8]) -> TrieResult<bool> {
         TrieOps::contains(key, &self.root_hash, self.db.as_ref(), &self.root)
     }
 
-    /// Inserts value into trie and modifies it if it exists
+    fn verify_proof(
+        &self,
+        root_hash: H256,
+        key: &[u8],
+        proof: Vec<Vec<u8>>,
+    ) -> TrieResult<Option<Vec<u8>>> {
+        TrieOps::verify_proof(root_hash, key, proof)
+    }
+}
+
+impl<D> TrieMut<D> for EthTrie<D>
+where
+    D: DB,
+{
+
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.as_ref(), &mut self.root, &mut self.passing_keys)?;
         self.root = node;
         Ok(())
     }
 
-    /// Removes any existing value for key from the trie.
     fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
         let (root, res) = TrieOps::remove(key, &self.root_hash, self.db.as_ref(), &mut self.root, &mut self.passing_keys)?;
         self.root = root;
         Ok(res)
     }
 
-    /// Removes all existing (key, value) pairs from the trie.
-    /// Returns the number of removed pairs.
     fn remove_all(&mut self) -> TrieResult<usize> {
         let keys: Vec<_> = self.iter().map(|(k, _)| k).collect();
         let keys_len = keys.len();
@@ -309,35 +329,17 @@ where
         Ok(keys_len)
     }
 
-    /// Saves all the nodes in the db, clears the cache data, recalculates the root.
-    /// Returns the root hash of the trie.
-    fn root_hash(&mut self) -> TrieResult<H256> {
+    fn commit(&mut self) -> TrieResult<H256> {
         let (root_hash, root) = TrieOps::commit(&self.root,  self.db.as_ref(), &mut self.gen_keys, &mut self.cache, &mut self.passing_keys)?;
         self.root = root;
         self.root_hash = root_hash;
         Ok(root_hash)
     }
 
-    /// Prove constructs a merkle proof for key. The result contains all encoded nodes
-    /// on the path to the value at key. The value itself is also included in the last
-    /// node and can be retrieved by verifying the proof.
-    ///
-    /// If the trie does not contain a value for key, the returned proof contains all
-    /// nodes of the longest existing prefix of the key (at least the root node), ending
-    /// with the node that proves the absence of the key.
     fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
         TrieOps::get_proof(key, &self.root_hash, self.db.as_ref(), &self.root, &mut self.gen_keys, &mut self.cache)
     }
 
-    /// return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
-        &self,
-        root_hash: H256,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-    ) -> TrieResult<Option<Vec<u8>>> {
-        TrieOps::verify_proof(root_hash, key, proof)
-    }
 }
 
 #[cfg(test)]
@@ -351,7 +353,7 @@ mod tests {
     use ethereum_types::H256;
     use keccak_hash::KECCAK_NULL_RLP;
 
-    use super::{EthTrie, Trie};
+    use super::{EthTrie, Trie, TrieMut};
     use crate::db::{MemoryDB, DB};
     use crate::errors::TrieError;
     use crate::nibbles::Nibbles;
@@ -392,7 +394,7 @@ mod tests {
             .unwrap();
         trie.insert(b"test2-key", b"really-long-value2-to-prevent-inlining")
             .unwrap();
-        let actual_root_hash = trie.root_hash().unwrap();
+        let actual_root_hash = trie.commit().unwrap();
 
         // Manually corrupt the database by removing a trie node
         // This is the hash for the leaf node for test2-key
@@ -595,7 +597,7 @@ mod tests {
             trie.insert(b"test23", b"test").unwrap();
             trie.insert(b"test33", b"test").unwrap();
             trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
+            trie.commit().unwrap()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
@@ -603,7 +605,7 @@ mod tests {
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
         assert_eq!(Some(b"test".to_vec()), v2);
-        let root2 = trie.root_hash().unwrap();
+        let root2 = trie.commit().unwrap();
         assert_eq!(hex::encode(root), hex::encode(root2));
     }
 
@@ -618,12 +620,12 @@ mod tests {
             trie.insert(b"test23", b"test").unwrap();
             trie.insert(b"test33", b"test").unwrap();
             trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
+            trie.commit().unwrap()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
         trie.insert(b"test55", b"test55").unwrap();
-        trie.root_hash().unwrap();
+        trie.commit().unwrap();
         let v = trie.get(b"test55").unwrap();
         assert_eq!(Some(b"test55".to_vec()), v);
     }
@@ -639,7 +641,7 @@ mod tests {
             trie.insert(b"test23", b"test").unwrap();
             trie.insert(b"test33", b"test").unwrap();
             trie.insert(b"test44", b"test").unwrap();
-            trie.root_hash().unwrap()
+            trie.commit().unwrap()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
@@ -661,7 +663,7 @@ mod tests {
             let memdb = Arc::new(MemoryDB::new(true));
             let mut trie = EthTrie::new(memdb);
             trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie.root_hash().unwrap()
+            trie.commit().unwrap()
         };
 
         let root2 = {
@@ -669,9 +671,9 @@ mod tests {
             let mut trie = EthTrie::new(memdb);
             trie.insert(k0.as_bytes(), v.as_bytes()).unwrap();
             trie.insert(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie.root_hash().unwrap();
+            trie.commit().unwrap();
             trie.remove(k1.as_ref()).unwrap();
-            trie.root_hash().unwrap()
+            trie.commit().unwrap()
         };
 
         let root3 = {
@@ -679,11 +681,11 @@ mod tests {
             let mut trie1 = EthTrie::new(Arc::clone(&memdb));
             trie1.insert(k0.as_bytes(), v.as_bytes()).unwrap();
             trie1.insert(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie1.root_hash().unwrap();
-            let root = trie1.root_hash().unwrap();
+            trie1.commit().unwrap();
+            let root = trie1.commit().unwrap();
             let mut trie2 = trie1.at_root(root);
             trie2.remove(k1.as_bytes()).unwrap();
-            trie2.root_hash().unwrap()
+            trie2.commit().unwrap()
         };
 
         assert_eq!(root1, root2);
@@ -704,14 +706,14 @@ mod tests {
             trie.insert(&random_bytes, &random_bytes).unwrap();
             keys.push(random_bytes.clone());
         }
-        trie.root_hash().unwrap();
+        trie.commit().unwrap();
         let slice = &mut keys;
         slice.shuffle(&mut rng);
 
         for key in slice.iter() {
             trie.remove(key).unwrap();
         }
-        trie.root_hash().unwrap();
+        trie.commit().unwrap();
 
         let empty_node_key = KECCAK_NULL_RLP;
         let value = trie.db.get(&
@@ -730,7 +732,7 @@ mod tests {
         trie.insert(b"test23", b"test").unwrap();
         trie.insert(b"test33", b"test").unwrap();
         trie.insert(b"test44", b"test").unwrap();
-        trie.root_hash().unwrap();
+        trie.commit().unwrap();
 
         let v = trie.get(b"test").unwrap();
         assert_eq!(Some(b"test".to_vec()), v);
@@ -756,7 +758,7 @@ mod tests {
             kv.iter().for_each(|(k, v)| {
                 trie.insert(k, v).unwrap();
             });
-            root1 = trie.root_hash().unwrap();
+            root1 = trie.commit().unwrap();
 
             trie.iter()
                 .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
@@ -777,7 +779,7 @@ mod tests {
                 trie.insert(k, v).unwrap();
             });
 
-            trie.root_hash().unwrap();
+            trie.commit().unwrap();
 
             let mut kv_delete = HashSet::new();
             kv_delete.insert(b"test".to_vec());
@@ -790,7 +792,7 @@ mod tests {
 
             kv2.retain(|k, _| !kv_delete.contains(k));
 
-            trie.root_hash().unwrap();
+            trie.commit().unwrap();
             trie.iter()
                 .for_each(|(k, v)| assert_eq!(kv2.remove(&k).unwrap(), v));
             assert!(kv2.is_empty());
@@ -807,7 +809,7 @@ mod tests {
         let memdb = Arc::new(MemoryDB::new(true));
         let mut trie = EthTrie::new(memdb.clone());
         trie.insert(b"key", b"val").unwrap();
-        let new_root_hash = trie.root_hash().unwrap();
+        let new_root_hash = trie.commit().unwrap();
 
         let empty_trie = EthTrie::new(memdb);
         // Can't find key in new trie at empty root
@@ -829,7 +831,7 @@ mod tests {
             b"even-longer-val-to-go-more-than-32-bytes",
         )
         .unwrap();
-        let new_root_hash = trie.root_hash().unwrap();
+        let new_root_hash = trie.commit().unwrap();
 
         let empty_trie = EthTrie::new(memdb);
         // Can't find key in new trie at empty root
@@ -852,7 +854,7 @@ mod tests {
         let root_hash_1 = {
             let mut trie = EthTrie::new(memdb.clone());
             trie.insert(b"key", b"val").unwrap();
-            let root_hash = trie.root_hash().unwrap();
+            let root_hash = trie.commit().unwrap();
     
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());
@@ -868,7 +870,7 @@ mod tests {
             trie.insert(b"key3", b"val_inner").unwrap();
             
             assert_eq!(&trie.get(b"key").unwrap().unwrap(), b"val_inner");
-            let root_hash = trie.root_hash().unwrap();
+            let root_hash = trie.commit().unwrap();
     
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());
@@ -882,7 +884,7 @@ mod tests {
             let removed = trie.remove_all().unwrap();
             assert_eq!(removed, 3);
 
-            let root_hash = trie.root_hash().unwrap();
+            let root_hash = trie.commit().unwrap();
 
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());

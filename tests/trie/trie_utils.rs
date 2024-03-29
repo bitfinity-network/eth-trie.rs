@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use eth_trie::{EthTrie, MemoryDB, Trie};
+use eth_trie::{EthTrie, MemoryDB, Trie, TrieMut};
 use keccak_hash::H256;
 
 #[derive(Clone)]
@@ -37,7 +37,7 @@ pub fn trie_test_with_actions(
 
     // Do the actions
     for action in actions {
-        roots.push(trie.root_hash().unwrap());
+        roots.push(trie.commit().unwrap());
 
         match action {
             TrieAction::Set(key, val) => {
@@ -56,7 +56,7 @@ pub fn trie_test_with_actions(
     }
 
     if let Some(expected) = &expected_root {
-        assert_eq!(trie.root_hash().unwrap(), *expected);
+        assert_eq!(trie.commit().unwrap(), *expected);
     }
 
 }

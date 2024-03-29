@@ -1,14 +1,14 @@
-use std::sync::Arc;
+use std::{borrow::{Borrow, BorrowMut}, sync::Arc};
 
 use hashbrown::{HashMap, HashSet};
 use keccak_hash::H256;
 
-use crate::{node::Node, DB};
+use crate::{nibbles::Nibbles, node::Node, Trie, TrieMut, DB};
 
-
+use super::{ops::TrieOps, TrieIterator, TrieResult};
 
 #[derive(Debug)]
-pub struct TrieChild<'a, D>
+pub struct TrieRef<C, GP, D>
 where
     D: DB,
 {
@@ -18,49 +18,71 @@ where
     db: Arc<D>,
 
     // The batch of pending new nodes to write
-    cache: &'a HashMap<H256, Vec<u8>>,
-    passing_keys: &'a HashSet<H256>,
-    gen_keys: &'a HashSet<H256>,
+    cache: C,
+    passing_keys: GP,
+    gen_keys: GP,
 }
 
-impl<'a, D> TrieChild<'a, D>
-where
-    D: DB,
-{
-    pub fn new(
-        root_hash: H256,
-        db: Arc<D>,
-        cache: &'a HashMap<H256, Vec<u8>>,
-        passing_keys: &'a HashSet<H256>,
-        gen_keys: &'a HashSet<H256>,
-    ) -> Self {
-        TrieChild {
-            root: Node::from_hash(root_hash),
-            root_hash,
-            db,
-            cache,
-            passing_keys,
-            gen_keys,
+impl <C: Borrow<HashMap<H256, Vec<u8>>>, GP: Borrow<HashSet<H256>>, D: DB> Trie<D> for TrieRef<C, GP, D> {
+
+    fn iter(&self) -> TrieIterator<D> {
+        let nodes = vec![(self.root.clone()).into()];
+        TrieIterator {
+            db: self.db.as_ref(),
+            nibble: Nibbles::from_raw(&[], false),
+            nodes,
         }
+    }
+    
+    fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
+        TrieOps::get(key, &self.root_hash, self.db.as_ref(), &self.root)
+    }
+
+    fn contains(&self, key: &[u8]) -> TrieResult<bool> {
+        TrieOps::contains(key, &self.root_hash, self.db.as_ref(), &self.root)
+    }
+
+    fn verify_proof(
+        &self,
+        root_hash: H256,
+        key: &[u8],
+        proof: Vec<Vec<u8>>,
+    ) -> TrieResult<Option<Vec<u8>>> {
+        TrieOps::verify_proof(root_hash, key, proof)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::borrow::Cow;
+impl <C: BorrowMut<HashMap<H256, Vec<u8>>>, GP: BorrowMut<HashSet<H256>>, D: DB> TrieMut<D> for TrieRef<C, GP, D> {
 
-    use super::*;
-    use crate::{trie, EthTrie, MemoryDB};
+    fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
+        let node = TrieOps::insert(key, value, &self.root_hash, self.db.as_ref(), &mut self.root, self.passing_keys.borrow_mut())?;
+        self.root = node;
+        Ok(())
+    }
 
-    #[test]
-    fn test_trie_child() {
-        let db = Arc::new(MemoryDB::new(false));
-        let mut trie = EthTrie::new(db.clone());
-        
-        let child_hash = H256::from_low_u64_be(1242412);
-        let mut trie_child = trie.trie_at_root_mut(child_hash);
-        
-        let mut_cow = Cow::Borrowed(&mut trie_child);
+    fn remove(&mut self, key: &[u8]) -> TrieResult<bool> {
+        let (root, res) = TrieOps::remove(key, &self.root_hash, self.db.as_ref(), &mut self.root, self.passing_keys.borrow_mut())?;
+        self.root = root;
+        Ok(res)
+    }
 
+    fn remove_all(&mut self) -> TrieResult<usize> {
+        let keys: Vec<_> = self.iter().map(|(k, _)| k).collect();
+        let keys_len = keys.len();
+        for key in keys {
+            self.remove(&key)?;
+        }
+        Ok(keys_len)
+    }
+
+    fn commit(&mut self) -> TrieResult<H256> {
+        let (root_hash, root) = TrieOps::commit(&self.root,  self.db.as_ref(), self.gen_keys.borrow_mut(), self.cache.borrow_mut(), self.passing_keys.borrow_mut())?;
+        self.root = root;
+        self.root_hash = root_hash;
+        Ok(root_hash)
+    }
+
+    fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
+        TrieOps::get_proof(key, &self.root_hash, self.db.as_ref(), &self.root, self.gen_keys.borrow_mut(), self.cache.borrow_mut())
     }
 }

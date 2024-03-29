@@ -95,7 +95,7 @@ impl DB for VersionedDB {
 #[cfg(test)]
 mod test {
 
-    use crate::{EthTrie, Trie};
+    use crate::{trie::TrieMut, EthTrie, Trie};
 
     use super::*;
 
@@ -162,7 +162,7 @@ mod test {
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
 
         // Committed at version 0
-        let root_zero = trie.root_hash().unwrap();
+        let root_zero = trie.commit().unwrap();
         db.commit_version(None);
 
         let mut trie = EthTrie::new(db.clone()).at_root(root_zero);
@@ -170,7 +170,7 @@ mod test {
         trie.remove(b"test").unwrap();
 
         // Committed at version 1
-        let root_one = trie.root_hash().unwrap();
+        let root_one = trie.commit().unwrap();
         db.commit_version(None);
 
         let mut trie = EthTrie::new(db.clone()).at_root(root_one);
@@ -178,7 +178,7 @@ mod test {
         trie.insert(b"test", b"test_2").unwrap();
 
         // Committed at version 2
-        let root_two = trie.root_hash().unwrap();
+        let root_two = trie.commit().unwrap();
         db.commit_version(None);
 
         let trie = EthTrie::new(db.clone()).at_root(root_zero);
