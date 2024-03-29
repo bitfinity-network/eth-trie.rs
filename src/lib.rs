@@ -6,7 +6,7 @@ mod db;
 mod errors;
 mod trie;
 
-pub use db::{MemoryDB, DB};
+pub use db::{MemoryDB, DB, versioned::VersionedDB};
 pub use errors::{MemDBError, TrieError};
 pub use trie::{EthTrie, Trie};
 

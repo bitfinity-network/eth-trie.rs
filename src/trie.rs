@@ -61,9 +61,9 @@ where
     db: Arc<D>,
 
     // The batch of pending new nodes to write
-    cache: HashMap<Vec<u8>, Vec<u8>>,
-    passing_keys: HashSet<Vec<u8>>,
-    gen_keys: HashSet<Vec<u8>>,
+    cache: HashMap<H256, Vec<u8>>,
+    passing_keys: HashSet<H256>,
+    gen_keys: HashSet<H256>,
 }
 
 enum EncodedNode {
@@ -172,7 +172,7 @@ where
 
                     (TraceStatus::Doing, Node::Hash(ref hash_node)) => {
                         let node_hash = hash_node.hash;
-                        if let Ok(n) = self.trie.recover_from_db(node_hash) {
+                        if let Ok(n) = self.trie.recover_from_db(&node_hash) {
                             self.nodes.pop();
                             match n {
                                 Some(node) => self.nodes.push(node.into()),
@@ -391,7 +391,7 @@ where
             let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
 
             if root_hash.eq(&hash) || node_encoded.len() >= HASHED_LENGTH {
-                proof_db.insert(hash.as_bytes(), node_encoded).unwrap();
+                proof_db.insert(hash, node_encoded).unwrap();
             }
         }
         let trie = EthTrie::new(proof_db).at_root(root_hash);
@@ -443,7 +443,7 @@ where
             Node::Hash(hash_node) => {
                 let node_hash = hash_node.hash;
                 let node =
-                    self.recover_from_db(node_hash)?
+                    self.recover_from_db(&node_hash)?
                         .ok_or_else(|| TrieError::MissingTrieNode {
                             node_hash,
                             traversed: Some(path.slice(0, path_index)),
@@ -545,9 +545,9 @@ where
             }
             Node::Hash(hash_node) => {
                 let node_hash = hash_node.hash;
-                self.passing_keys.insert(node_hash.as_bytes().to_vec());
+                self.passing_keys.insert(node_hash);
                 let node =
-                    self.recover_from_db(node_hash)?
+                    self.recover_from_db(&node_hash)?
                         .ok_or_else(|| TrieError::MissingTrieNode {
                             node_hash,
                             traversed: Some(path.slice(0, path_index)),
@@ -613,10 +613,10 @@ where
             }
             Node::Hash(hash_node) => {
                 let hash = hash_node.hash;
-                self.passing_keys.insert(hash.as_bytes().to_vec());
+                self.passing_keys.insert(hash);
 
                 let node =
-                    self.recover_from_db(hash)?
+                    self.recover_from_db(&hash)?
                         .ok_or_else(|| TrieError::MissingTrieNode {
                             node_hash: hash,
                             traversed: Some(path.slice(0, path_index)),
@@ -685,10 +685,10 @@ where
                     // try again after recovering node from the db.
                     Node::Hash(hash_node) => {
                         let node_hash = hash_node.hash;
-                        self.passing_keys.insert(node_hash.as_bytes().to_vec());
+                        self.passing_keys.insert(node_hash);
 
                         let new_node =
-                            self.recover_from_db(node_hash)?
+                            self.recover_from_db(&node_hash)?
                                 .ok_or(TrieError::MissingTrieNode {
                                     node_hash,
                                     traversed: None,
@@ -746,7 +746,7 @@ where
             Node::Hash(hash_node) => {
                 let node_hash = hash_node.hash;
                 let n = self
-                    .recover_from_db(node_hash)?
+                    .recover_from_db(&node_hash)?
                     .ok_or(TrieError::MissingTrieNode {
                         node_hash,
                         traversed: None,
@@ -765,7 +765,7 @@ where
             EncodedNode::Hash(hash) => hash,
             EncodedNode::Inline(encoded) => {
                 let hash: H256 = keccak(&encoded).as_fixed_bytes().into();
-                self.cache.insert(hash.as_bytes().to_vec(), encoded);
+                self.cache.insert(hash, encoded);
                 hash
             }
         };
@@ -773,7 +773,7 @@ where
         let mut keys = Vec::with_capacity(self.cache.len());
         let mut values = Vec::with_capacity(self.cache.len());
         for (k, v) in self.cache.drain() {
-            keys.push(k.to_vec());
+            keys.push(k);
             values.push(v);
         }
 
@@ -781,11 +781,10 @@ where
             .insert_batch(keys, values)
             .map_err(|e| TrieError::DB(e.to_string()))?;
 
-        let removed_keys: Vec<Vec<u8>> = self
+        let removed_keys: Vec<_> = self
             .passing_keys
             .iter()
-            .filter(|h| !self.gen_keys.contains(&h.to_vec()))
-            .map(|h| h.to_vec())
+            .filter(|h| !self.gen_keys.contains(*h))
             .collect();
 
         self.db
@@ -796,10 +795,11 @@ where
         self.gen_keys.clear();
         self.passing_keys.clear();
         self.root = self
-            .recover_from_db(root_hash)?
+            .recover_from_db(&root_hash)?
             .expect("The root that was just created is missing");
         Ok(root_hash)
     }
+
 
     fn write_node(&mut self, to_encode: &Node) -> EncodedNode {
         // Returns the hash value directly to avoid double counting.
@@ -814,9 +814,9 @@ where
             EncodedNode::Inline(data)
         } else {
             let hash: H256 = keccak(&data).as_fixed_bytes().into();
-            self.cache.insert(hash.as_bytes().to_vec(), data);
+            self.cache.insert(hash, data);
 
-            self.gen_keys.insert(hash.as_bytes().to_vec());
+            self.gen_keys.insert(hash);
             EncodedNode::Hash(hash)
         }
     }
@@ -910,10 +910,10 @@ where
         }
     }
 
-    fn recover_from_db(&self, key: H256) -> TrieResult<Option<Node>> {
+    fn recover_from_db(&self, key: &H256) -> TrieResult<Option<Node>> {
         let node = match self
             .db
-            .get(key.as_bytes())
+            .get(key)
             .map_err(|e| TrieError::DB(e.to_string()))?
         {
             Some(value) => Some(Self::decode_node(&value)?),
@@ -978,15 +978,15 @@ mod tests {
 
         // Manually corrupt the database by removing a trie node
         // This is the hash for the leaf node for test2-key
-        let node_hash_to_delete = b"\xcb\x15v%j\r\x1e\te_TvQ\x8d\x93\x80\xd1\xa2\xd1\xde\xfb\xa5\xc3hJ\x8c\x9d\xb93I-\xbd";
-        assert_ne!(corruptor_db.get(node_hash_to_delete).unwrap(), None);
-        corruptor_db.remove(node_hash_to_delete).unwrap();
-        assert_eq!(corruptor_db.get(node_hash_to_delete).unwrap(), None);
+        let node_hash_to_delete = H256::from_slice(b"\xcb\x15v%j\r\x1e\te_TvQ\x8d\x93\x80\xd1\xa2\xd1\xde\xfb\xa5\xc3hJ\x8c\x9d\xb93I-\xbd");
+        assert_ne!(corruptor_db.get(&node_hash_to_delete).unwrap(), None);
+        corruptor_db.remove(&node_hash_to_delete).unwrap();
+        assert_eq!(corruptor_db.get(&node_hash_to_delete).unwrap(), None);
 
         (
             trie,
             actual_root_hash,
-            H256::from_slice(node_hash_to_delete),
+            node_hash_to_delete,
         )
     }
 
@@ -1296,7 +1296,8 @@ mod tests {
         trie.root_hash().unwrap();
 
         let empty_node_key = KECCAK_NULL_RLP;
-        let value = trie.db.get(empty_node_key.as_ref()).unwrap().unwrap();
+        let value = trie.db.get(&
+            empty_node_key).unwrap().unwrap();
         assert_eq!(value, &rlp::NULL_RLP)
     }
 
