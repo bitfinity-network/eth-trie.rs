@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_memdb_get() {
         let memdb = MemoryDB::new(true);
-        let key = H256::from_slice(b"test-key");
+        let key = H256::from_low_u64_be(123654);
         memdb.insert(key, b"test-value".to_vec()).unwrap();
         let v = memdb.get(&key).unwrap().unwrap();
 
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn test_memdb_remove() {
         let memdb = MemoryDB::new(true);
-        let key = H256::from_slice(b"test-key");
+        let key = H256::from_low_u64_be(3244);
         memdb.insert(key, b"test".to_vec()).unwrap();
 
         memdb.remove(&key).unwrap();

@@ -24,6 +24,8 @@ rand = "0.8.3"
 hex = "0.4.2"
 criterion = "0.5.1"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [[bench]]
 name = "trie"
