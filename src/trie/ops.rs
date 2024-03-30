@@ -534,28 +534,18 @@ impl TrieOps {
             }
         };
 
-        let mut keys = Vec::with_capacity(cache.len());
-        let mut values = Vec::with_capacity(cache.len());
-        for (k, v) in cache.drain() {
-            keys.push(k);
-            values.push(v);
+        for (key, value) in cache.drain() {
+            db.insert(key, value).map_err(|e| TrieError::DB(e.to_string()))?;
         }
 
-        db
-            .insert_batch(keys, values)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
-
-        let removed_keys: Vec<_> = passing_keys
-            .iter()
-            .filter(|h| !gen_keys.contains(*h))
-            .collect();
-
-        db
-            .remove_batch(&removed_keys)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
+        for key in passing_keys.drain() {
+            if !gen_keys.contains(&key) {
+                db.remove(&key).map_err(|e| TrieError::DB(e.to_string()))?;
+            }
+        }
 
         gen_keys.clear();
-        passing_keys.clear();
+
         let new_root = Self::recover_from_db(db, &root_hash)?
             .expect("The root that was just created is missing");
         Ok((root_hash, new_root))

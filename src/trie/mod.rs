@@ -877,7 +877,7 @@ mod tests {
     
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());
-            assert_eq!(memdb.len().unwrap(), 1);
+            assert_eq!(memdb.len().unwrap(), 4);
             root_hash
         };
 

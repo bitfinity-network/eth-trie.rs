@@ -7,6 +7,7 @@ use parking_lot::RwLock;
 pub mod versioned;
 
 use crate::errors::MemDBError;
+use crate::trie::TrieCache;
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
@@ -21,22 +22,6 @@ pub trait DB {
 
     /// Remove data with given key.
     fn remove(&mut self, key: &H256) -> Result<(), Self::Error>;
-
-    /// Insert a batch of data into the cache.
-    fn insert_batch(&mut self, mut keys: Vec<H256>, mut values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
-        while let (Some(key), Some(value)) = (keys.pop(), values.pop()) {
-            self.insert(key, value)?;
-        }
-        Ok(())
-    }
-
-    /// Remove a batch of data into the cache.
-    fn remove_batch(&mut self, keys: &[&H256]) -> Result<(), Self::Error> {
-        for key in keys {
-            self.remove(key)?;
-        }
-        Ok(())
-    }
 
     fn len(&self) -> Result<usize, Self::Error>;
 
