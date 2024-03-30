@@ -158,7 +158,7 @@ mod test {
         let root_zero = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new_mut(&mut db).at_root(root_zero);
+        let mut trie = EthTrie::new_mut_at_root(&mut db,root_zero);
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
         trie.remove(b"test").unwrap();
 
@@ -166,7 +166,7 @@ mod test {
         let root_one = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new_mut(&mut db).at_root(root_one);
+        let mut trie = EthTrie::new_mut_at_root(&mut db,root_one);
         assert_eq!(None, trie.get(b"test").unwrap());
         trie.insert(b"test", b"test_2").unwrap();
 

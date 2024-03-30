@@ -2,7 +2,6 @@
 mod trie_tests {
     use hex::FromHex;
     use rand::Rng;
-    use std::sync::Arc;
 
     use crate::db::MemoryDB;
     use crate::trie::{EthTrie, Trie, TrieMut};

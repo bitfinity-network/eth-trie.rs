@@ -285,7 +285,7 @@ pub fn new_mut(db: &mut D) -> EthTrie<&mut D, D> {
     }
 }
 
-    pub fn new_at_root(db: &mut D, root_hash: H256) -> EthTrie<&mut D, D> {
+    pub fn new_mut_at_root(db: &mut D, root_hash: H256) -> EthTrie<&mut D, D> {
         EthTrie {
             root: Node::from_hash(root_hash),
             root_hash,
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(db.get(&node_hash_to_delete).unwrap(), None);
 
         (
-            trie,
+            EthTrie::new_mut_at_root(db, actual_root_hash),
             actual_root_hash,
             node_hash_to_delete,
         )
@@ -643,7 +643,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
+        let mut trie = EthTrie::new_mut_at_root(&mut memdb,root);
         let v1 = trie.get(b"test33").unwrap();
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
@@ -666,7 +666,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
+        let mut trie = EthTrie::new_mut_at_root(&mut memdb,root);
         trie.insert(b"test55", b"test55").unwrap();
         trie.commit().unwrap();
         let v = trie.get(b"test55").unwrap();
@@ -687,7 +687,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_mut(&mut memdb).at_root(root);
+        let mut trie = EthTrie::new_mut_at_root(&mut memdb,root);
         let removed = trie.remove(b"test44").unwrap();
         assert!(removed);
         let removed = trie.remove(b"test33").unwrap();
@@ -842,7 +842,7 @@ mod tests {
             assert!(kv2.is_empty());
         }
 
-        let trie = EthTrie::new_mut(&mut memdb).at_root(root1);
+        let trie = EthTrie::new_mut_at_root(&mut memdb,root1);
         trie.iter()
             .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
         assert!(kv.is_empty());
@@ -907,7 +907,7 @@ mod tests {
         };
 
         let root_hash_2 =  {
-            let mut trie = EthTrie::new_mut(&mut memdb).at_root(root_hash_1);
+            let mut trie = EthTrie::new_mut_at_root(&mut memdb,root_hash_1);
 
             trie.insert(b"key", b"val_inner").unwrap();
             trie.insert(b"key2", b"val_inner").unwrap();
@@ -923,7 +923,7 @@ mod tests {
         };
 
         let _root_hash_3 =  {
-            let mut trie = EthTrie::new_mut( &mut memdb).at_root(root_hash_2);
+            let mut trie = EthTrie::new_mut_at_root(&mut memdb, root_hash_2);
 
             let removed = trie.remove_all().unwrap();
             assert_eq!(removed, 3);

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use eth_trie::{EthTrie, MemoryDB, Trie, TrieMut};
 use keccak_hash::H256;
