@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
 
-use eth_trie::{EthTrie, MemoryDB, Trie, TrieMut};
+use eth_trie::*;
 use keccak_hash::H256;
 
 #[derive(Clone)]
 pub enum TrieAction {
     Set(Vec<u8>, Vec<u8>),
     Delete(Vec<u8>),
-    Empty,
 }
 
 // Check if trie content corresponds to the map
@@ -31,7 +30,7 @@ pub fn trie_test_with_actions(
 ) {
     // Arrange
     let mut db = MemoryDB::new(true);
-    let mut trie = EthTrie::new_mut(&mut db);
+    let mut trie = EthTrie::new(&mut db);
     let mut roots = Vec::new();
     let mut storage = BTreeMap::<Vec<u8>, Vec<u8>>::new();
 
@@ -49,7 +48,6 @@ pub fn trie_test_with_actions(
                 storage.remove(&key);
                 trie.remove(key.as_ref()).unwrap();
             }
-            TrieAction::Empty => {}
         }
 
         check_trie(&trie, &storage);

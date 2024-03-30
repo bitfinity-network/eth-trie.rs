@@ -1,25 +1,25 @@
 #[cfg(test)]
 mod trie_tests {
     use hex::FromHex;
+    use keccak_hash::H256;
     use rand::Rng;
 
     use crate::db::MemoryDB;
-    use crate::trie::{EthTrie, Trie, TrieMut};
+    use crate::trie::{EthTrie, Trie, TrieCommit};
 
     fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
+        let expected_hash: H256 = hash.parse().unwrap();
         let mut memdb = MemoryDB::new(true);
-        let mut trie = EthTrie::new_mut(&mut memdb);
+        let mut trie = EthTrie::new(&mut memdb);
         for (k, v) in data.into_iter() {
             trie.insert(k, v).unwrap();
         }
         let root_hash = trie.commit().unwrap();
-        let rs = format!("0x{}", hex::encode(root_hash));
-        assert_eq!(rs.as_str(), hash);
+        assert_eq!(root_hash, expected_hash);
 
-        let mut trie = trie.at_root(root_hash);
-        let r2 = trie.commit().unwrap();
-        let rs2 = format!("0x{}", hex::encode(r2));
-        assert_eq!(rs2.as_str(), hash);
+        let mut trie = EthTrie::new_at_root(&mut memdb, root_hash);
+        let root_hash_2 = trie.commit().unwrap();
+        assert_eq!(root_hash_2, expected_hash);
     }
 
     #[test]
@@ -549,7 +549,7 @@ mod trie_tests {
     #[test]
     fn test_proof_basic() {
         let mut memdb = MemoryDB::new(true);
-        let mut trie = EthTrie::new_mut(&mut memdb);
+        let mut trie = EthTrie::new(&mut memdb);
         trie.insert(b"doe", b"reindeer").unwrap();
         trie.insert(b"dog", b"puppy").unwrap();
         trie.insert(b"dogglesworth", b"cat").unwrap();
@@ -609,7 +609,7 @@ mod trie_tests {
     #[test]
     fn test_proof_random() {
         let mut memdb = MemoryDB::new(true);
-        let mut trie = EthTrie::new_mut(&mut memdb);
+        let mut trie = EthTrie::new(&mut memdb);
         let mut rng = rand::thread_rng();
         let mut keys = vec![];
         for _ in 0..100 {
@@ -633,7 +633,7 @@ mod trie_tests {
     #[test]
     fn test_proof_empty_trie() {
         let mut memdb = MemoryDB::new(true);
-        let mut trie = EthTrie::new_mut(&mut memdb);
+        let mut trie = EthTrie::new(&mut memdb);
         trie.commit().unwrap();
         let proof = trie.get_proof(b"not-exist").unwrap();
         assert_eq!(proof.len(), 0);
@@ -642,7 +642,7 @@ mod trie_tests {
     #[test]
     fn test_proof_one_element() {
         let mut memdb = MemoryDB::new(true);
-        let mut trie = EthTrie::new_mut(&mut memdb);
+        let mut trie = EthTrie::new(&mut memdb);
         trie.insert(b"k", b"v").unwrap();
         let root = trie.commit().unwrap();
         let proof = trie.get_proof(b"k").unwrap();

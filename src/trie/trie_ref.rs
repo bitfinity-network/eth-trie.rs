@@ -1,11 +1,10 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
-use hashbrown::{HashMap, HashSet};
 use keccak_hash::H256;
 
-use crate::{nibbles::Nibbles, node::Node, Trie, TrieMut, DB};
+use crate::{nibbles::Nibbles, node::Node, Trie, DB};
 
-use super::{ops::TrieOps, TrieIterator, TrieResult};
+use super::{ops::TrieOps, TrieCache, TrieIterator, TrieKeys, TrieResult};
 
 #[derive(Debug)]
 pub struct TrieRef<C, GP, R, D: DB>
@@ -35,7 +34,11 @@ impl <C, GP, R, D: DB> TrieRef<C, GP, R, D> {
     }
 }
 
-impl <C: Borrow<HashMap<H256, Vec<u8>>>, GP: Borrow<HashSet<H256>>, R: Borrow<D>, D: DB> Trie<D> for TrieRef<C, GP, R, D> {
+impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> Trie<D> for TrieRef<C, GP, R, D> {
+
+    fn uncommitted_root(&self) -> H256 {
+        self.root_hash
+    }
 
     fn iter(&self) -> TrieIterator<D> {
         let nodes = vec![(self.root.clone()).into()];
@@ -62,9 +65,6 @@ impl <C: Borrow<HashMap<H256, Vec<u8>>>, GP: Borrow<HashSet<H256>>, R: Borrow<D>
     ) -> TrieResult<Option<Vec<u8>>> {
         TrieOps::verify_proof(root_hash, key, proof)
     }
-}
-
-impl <C: BorrowMut<HashMap<H256, Vec<u8>>>, GP: BorrowMut<HashSet<H256>>, R: BorrowMut<D>, D: DB> TrieMut<D> for TrieRef<C, GP, R, D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, self.passing_keys.borrow_mut())?;
@@ -87,14 +87,8 @@ impl <C: BorrowMut<HashMap<H256, Vec<u8>>>, GP: BorrowMut<HashSet<H256>>, R: Bor
         Ok(keys_len)
     }
 
-    fn commit(&mut self) -> TrieResult<H256> {
-        let (root_hash, root) = TrieOps::commit(&self.root,  self.db.borrow_mut(), self.gen_keys.borrow_mut(), self.cache.borrow_mut(), self.passing_keys.borrow_mut())?;
-        self.root = root;
-        self.root_hash = root_hash;
-        Ok(root_hash)
-    }
-
     fn get_proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>> {
         TrieOps::get_proof(key, &self.root_hash, self.db.borrow_mut(), &self.root, self.gen_keys.borrow_mut(), self.cache.borrow_mut())
     }
+    
 }
