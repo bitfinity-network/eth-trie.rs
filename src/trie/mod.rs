@@ -247,7 +247,7 @@ pub fn new(db: D) -> EthTrie<D> {
     }
 }
 
-    pub fn new_at_root(db: D, root_hash: H256) -> EthTrie<D> {
+    pub fn with_root(db: D, root_hash: H256) -> EthTrie<D> {
         EthTrie {
             root: Node::from_hash(root_hash),
             root_hash,
@@ -260,7 +260,7 @@ pub fn new(db: D) -> EthTrie<D> {
         }
     }
     
-    pub fn at_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, &mut D, D> {
+    pub fn ref_with_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, &mut D, D> {
         TrieRef::new(Node::from_hash(root_hash), root_hash, self.db.borrow_mut(), &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
     }
 
@@ -338,10 +338,12 @@ impl<D: DB> TrieCommit<D> for EthTrie<D> {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::lock_api::RwLock;
     use rand::distributions::Alphanumeric;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng};
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
 
     use ethereum_types::H256;
     use keccak_hash::KECCAK_NULL_RLP;
@@ -399,7 +401,7 @@ mod tests {
         assert_eq!(db.get(&node_hash_to_delete).unwrap(), None);
 
         (
-            EthTrie::new_at_root(db, actual_root_hash),
+            EthTrie::with_root(db, actual_root_hash),
             actual_root_hash,
             node_hash_to_delete,
         )
@@ -600,7 +602,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_at_root(&mut memdb,root);
+        let mut trie = EthTrie::with_root(&mut memdb,root);
         let v1 = trie.get(b"test33").unwrap();
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
@@ -623,7 +625,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_at_root(&mut memdb,root);
+        let mut trie = EthTrie::with_root(&mut memdb,root);
         trie.insert(b"test55", b"test55").unwrap();
         trie.commit().unwrap();
         let v = trie.get(b"test55").unwrap();
@@ -644,7 +646,7 @@ mod tests {
             trie.commit().unwrap()
         };
 
-        let mut trie = EthTrie::new_at_root(&mut memdb,root);
+        let mut trie = EthTrie::with_root(&mut memdb,root);
         let removed = trie.remove(b"test44").unwrap();
         assert!(removed);
         let removed = trie.remove(b"test33").unwrap();
@@ -683,7 +685,7 @@ mod tests {
             trie1.insert(k1.as_bytes(), v.as_bytes()).unwrap();
             trie1.commit().unwrap();
             let root = trie1.commit().unwrap();
-            let mut trie2 = EthTrie::new_at_root(&mut memdb, root);
+            let mut trie2 = EthTrie::with_root(&mut memdb, root);
             trie2.remove(k1.as_bytes()).unwrap();
             trie2.commit().unwrap()
         };
@@ -799,7 +801,7 @@ mod tests {
             assert!(kv2.is_empty());
         }
 
-        let trie = EthTrie::new_at_root(&mut memdb,root1);
+        let trie = EthTrie::with_root(&mut memdb,root1);
         trie.iter()
             .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
         assert!(kv.is_empty());
@@ -816,7 +818,7 @@ mod tests {
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"key").unwrap(), None);
 
-        let trie_view = empty_trie.at_root(new_root_hash);
+        let trie_view = empty_trie.ref_with_root(new_root_hash);
         assert_eq!(&trie_view.get(b"key").unwrap().unwrap(), b"val");
 
         // Previous trie was not modified
@@ -838,7 +840,7 @@ mod tests {
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
 
-        let trie_view = empty_trie.at_root(new_root_hash);
+        let trie_view = empty_trie.ref_with_root(new_root_hash);
         assert_eq!(
             &trie_view.get(b"pretty-long-key").unwrap().unwrap(),
             b"even-longer-val-to-go-more-than-32-bytes"
@@ -859,12 +861,12 @@ mod tests {
     
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());
-            assert!(memdb.len().unwrap() == 1);
+            assert_eq!(memdb.len().unwrap(), 1);
             root_hash
         };
 
         let root_hash_2 =  {
-            let mut trie = EthTrie::new_at_root(&mut memdb,root_hash_1);
+            let mut trie = EthTrie::with_root(&mut memdb,root_hash_1);
 
             trie.insert(b"key", b"val_inner").unwrap();
             trie.insert(b"key2", b"val_inner").unwrap();
@@ -875,12 +877,12 @@ mod tests {
     
             // println!("root_hash : {:?}", root_hash);
             // println!("memdb.len() : {}", memdb.len().unwrap());
-            assert!(memdb.len().unwrap() == 4);
+            assert_eq!(memdb.len().unwrap(), 1);
             root_hash
         };
 
         let _root_hash_3 =  {
-            let mut trie = EthTrie::new_at_root(&mut memdb, root_hash_2);
+            let mut trie = EthTrie::with_root(&mut memdb, root_hash_2);
 
             let removed = trie.remove_all().unwrap();
             assert_eq!(removed, 3);
@@ -894,16 +896,62 @@ mod tests {
         };
 
         {
-            let trie = EthTrie::new_at_root(&mut memdb, root_hash_1);
+            let trie = EthTrie::with_root(&mut memdb, root_hash_1);
             assert_eq!(b"val".to_vec() , trie.get(b"key").unwrap().unwrap());
 
             memdb.commit_version(Some(11));
 
-            let trie = EthTrie::new_at_root(&mut memdb, root_hash_1);
+            let trie = EthTrie::with_root(&mut memdb, root_hash_1);
             assert!(trie.get(b"key").is_err());
             assert_eq!(1, memdb.len().unwrap());
         };
 
     }
+
+    // #[test]
+    // fn test_ref_child_trie() {
+    //     let mut memdb = Arc::new(RwLock::new(VersionedDB::new(10)));
+    //     let mut trie = EthTrie::new(memdb.clone());
+
+    //     let root_hash_1 = {
+    //         trie.insert(b"key", b"val").unwrap();
+    //         let root_hash = trie.commit().unwrap();
+    //         root_hash
+    //     };
+
+    //     let child_ref_root_hash =  {
+    //         let mut trie = trie.ref_with_root(root_hash_1);
+
+    //         trie.insert(b"key", b"val_inner").unwrap();
+    //         trie.insert(b"key2", b"val_inner").unwrap();
+    //         trie.insert(b"key3", b"val_inner").unwrap();
+            
+    //         assert_eq!(&trie.get(b"key").unwrap().unwrap(), b"val_inner");
+    
+    //         trie.uncommitted_root()
+    //     };
+
+    //     println!("root_hash_1 : {:?}", root_hash_1);
+    //     println!("child_ref_root_hash : {:?}", child_ref_root_hash);
+
+    //     // Data of the child is not saved in the database until commit is called on the root trie.    
+    //     {
+    //         assert_eq!(memdb.len().unwrap(), 1);
+    //         let mut trie = EthTrie::with_root(memdb.clone(), child_ref_root_hash);
+    //         assert!(!trie.contains(&child_ref_root_hash.0).unwrap());
+    //     }
+
+    //     // Commit the root trie
+    //         {
+    //             let mut trie = trie.ref_with_root(root_hash_1);
+    //             assert_eq!(&trie.get(b"key").unwrap().unwrap(), b"val");
+    //         }
+    //         {
+    //             let mut trie = trie.ref_with_root(child_ref_root_hash);
+    //             assert_eq!(&trie.get(b"key").unwrap().unwrap(), b"val_inner");
+    //             // assert!(trie.contains(&child_ref_root_hash.0).unwrap());
+    //         }
+
+    // }
 
 }

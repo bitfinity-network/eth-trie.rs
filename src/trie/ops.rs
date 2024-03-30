@@ -152,7 +152,7 @@ impl TrieOps {
                 proof_db.insert(hash, node_encoded).unwrap();
             }
         }
-        let trie = EthTrie::new_at_root(&mut proof_db, root_hash);
+        let trie = EthTrie::with_root(&mut proof_db, root_hash);
         trie.get(key).or(Err(TrieError::InvalidProof))
     }
 

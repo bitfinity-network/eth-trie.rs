@@ -17,7 +17,7 @@ mod trie_tests {
         let root_hash = trie.commit().unwrap();
         assert_eq!(root_hash, expected_hash);
 
-        let mut trie = EthTrie::new_at_root(&mut memdb, root_hash);
+        let mut trie = EthTrie::with_root(&mut memdb, root_hash);
         let root_hash_2 = trie.commit().unwrap();
         assert_eq!(root_hash_2, expected_hash);
     }

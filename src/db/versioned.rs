@@ -157,7 +157,7 @@ mod test {
         let root_zero = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new_at_root(&mut db,root_zero);
+        let mut trie = EthTrie::with_root(&mut db,root_zero);
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
         trie.remove(b"test").unwrap();
 
@@ -165,7 +165,7 @@ mod test {
         let root_one = trie.commit().unwrap();
         db.commit_version(None);
 
-        let mut trie = EthTrie::new_at_root(&mut db,root_one);
+        let mut trie = EthTrie::with_root(&mut db,root_one);
         assert_eq!(None, trie.get(b"test").unwrap());
         trie.insert(b"test", b"test_2").unwrap();
 
@@ -173,27 +173,27 @@ mod test {
         let root_two = trie.commit().unwrap();
         db.commit_version(None);
 
-        let trie = EthTrie::new_at_root(&mut db, root_zero);
+        let trie = EthTrie::with_root(&mut db, root_zero);
         assert_eq!(Some(b"test".to_vec()), trie.get(b"test").unwrap());
 
-        let trie = EthTrie::new_at_root(&mut db, root_two);
+        let trie = EthTrie::with_root(&mut db, root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
         db.commit_version(Some(12));
 
         // This should have been removed
-        let trie = EthTrie::new_at_root(&mut db, root_zero);
+        let trie = EthTrie::with_root(&mut db, root_zero);
         assert!(trie.get(b"test").is_err());
 
-        let trie = EthTrie::new_at_root(&mut db, root_one);
+        let trie = EthTrie::with_root(&mut db, root_one);
         assert_eq!(None, trie.get(b"test").unwrap());
 
-        let trie = EthTrie::new_at_root(&mut db, root_two);
+        let trie = EthTrie::with_root(&mut db, root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
         db.commit_version(Some(100));
       
-        let trie = EthTrie::new_at_root(&mut db, root_two);
+        let trie = EthTrie::with_root(&mut db, root_two);
         assert_eq!(Some(b"test_2".to_vec()), trie.get(b"test").unwrap());
 
     }
