@@ -18,12 +18,13 @@ strongly inspired by [go-ethereum trie](https://github.com/ethereum/go-ethereum/
 
 ```rust
 use std::sync::Arc;
+use parking_lot::RwLock;
 
 use eth_trie::MemoryDB;
-use eth_trie::{EthTrie, Trie, TrieError, TrieMut};
+use eth_trie::{EthTrie, Trie, TrieError, TrieCommit};
 
 fn main() -> Result<(), TrieError> {
-    let memdb = Arc::new(MemoryDB::new(true));
+    let memdb = Arc::new(RwLock::new(MemoryDB::new(true)));
 
     let key = b"test-key";
     let value = b"test-value";
@@ -38,7 +39,7 @@ fn main() -> Result<(), TrieError> {
     };
     assert_eq!(root.as_bytes(), b"\x0ee/\xd2Y,\x8aS}\xcf|0\x85L\xb2\x87\xea\xabt\x0c\x16\xd9G\x0c\xa3\xe0S\xf4\x9b}\xe3g");
 
-    let mut trie = EthTrie::new(memdb).at_root(root);
+    let mut trie = EthTrie::new_at_root(memdb, root);
 
     let exists = trie.contains(key)?;
     assert_eq!(exists, true);

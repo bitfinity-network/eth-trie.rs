@@ -1,11 +1,9 @@
 use std::borrow::BorrowMut;
-use std::sync::Arc;
 
 use ethereum_types::H256;
 use hashbrown::{HashMap, HashSet};
 use keccak_hash::KECCAK_NULL_RLP;
 use log::warn;
-use parking_lot::RwLock;
 
 use crate::db::DB;
 use crate::errors::TrieError;
@@ -77,18 +75,17 @@ pub type TrieCache = HashMap<H256, Vec<u8>>;
 pub type TrieKeys = HashSet<H256>;
 
 #[derive(Debug)]
-pub struct EthTrie<R, D: DB>
+pub struct EthTrie<D: DB>
 {
     root: Node,
     root_hash: H256,
 
-    db: R,
+    db: D,
 
     // The batch of pending new nodes to write
     cache: TrieCache,
     passing_keys: TrieKeys,
     gen_keys: TrieKeys,
-    phantom_d: std::marker::PhantomData<D>,
 }
 
 enum EncodedNode {
@@ -235,9 +232,9 @@ where
     }
 }
 
-impl<D: DB> EthTrie<&mut D, D> {
+impl<D: DB> EthTrie<D> {
 
-pub fn new(db: &mut D) -> EthTrie<&mut D, D> {
+pub fn new(db: D) -> EthTrie<D> {
     EthTrie {
         root: Node::Empty,
         root_hash: KECCAK_NULL_RLP.as_fixed_bytes().into(),
@@ -247,11 +244,10 @@ pub fn new(db: &mut D) -> EthTrie<&mut D, D> {
         gen_keys: TrieKeys::new(),
         
         db,
-        phantom_d: std::marker::PhantomData,
     }
 }
 
-    pub fn new_at_root(db: &mut D, root_hash: H256) -> EthTrie<&mut D, D> {
+    pub fn new_at_root(db: D, root_hash: H256) -> EthTrie<D> {
         EthTrie {
             root: Node::from_hash(root_hash),
             root_hash,
@@ -261,54 +257,16 @@ pub fn new(db: &mut D) -> EthTrie<&mut D, D> {
             gen_keys: TrieKeys::new(),
 
             db,
-            phantom_d: std::marker::PhantomData,
         }
     }
     
     pub fn at_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, &mut D, D> {
-        TrieRef::new(Node::from_hash(root_hash), root_hash, self.db, &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
-
+        TrieRef::new(Node::from_hash(root_hash), root_hash, self.db.borrow_mut(), &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
     }
 
 }
-
-impl<D: DB> EthTrie<Arc<RwLock<D>>, D> {
-
-    pub fn new_arc(db: Arc<RwLock<D>>) -> EthTrie<Arc<RwLock<D>>, D> {
-        EthTrie {
-            root: Node::Empty,
-            root_hash: KECCAK_NULL_RLP.as_fixed_bytes().into(),
-            
-            cache: TrieCache::new(),
-            passing_keys: TrieKeys::new(),
-            gen_keys: TrieKeys::new(),
-            
-            db,
-            phantom_d: std::marker::PhantomData,
-        }
-    }
     
-        pub fn new_arc_at_root(db: Arc<RwLock<D>>, root_hash: H256) -> EthTrie<Arc<RwLock<D>>, D> {
-            EthTrie {
-                root: Node::from_hash(root_hash),
-                root_hash,
-    
-                cache: TrieCache::new(),
-                passing_keys: TrieKeys::new(),
-                gen_keys: TrieKeys::new(),
-    
-                db,
-                phantom_d: std::marker::PhantomData,
-            }
-        }
-        
-        pub fn at_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, Arc<RwLock<D>>, D> {
-            TrieRef::new(Node::from_hash(root_hash), root_hash, self.db.clone(), &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
-        }
-    
-    }
-    
-impl<R: BorrowMut<D>, D: DB> Trie<D> for EthTrie<R, D> {
+impl<D: DB> Trie<D> for EthTrie<D> {
 
     fn uncommitted_root(&self) -> H256 {
         self.root_hash
@@ -317,18 +275,18 @@ impl<R: BorrowMut<D>, D: DB> Trie<D> for EthTrie<R, D> {
     fn iter(&self) -> TrieIterator<D> {
         let nodes = vec![(self.root.clone()).into()];
         TrieIterator {
-            db: self.db.borrow(),
+            db: &self.db,
             nibble: Nibbles::from_raw(&[], false),
             nodes,
         }
     }
 
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
-        TrieOps::get(key, &self.root_hash, self.db.borrow(), &self.root)
+        TrieOps::get(key, &self.root_hash, &self.db, &self.root)
     }
 
     fn contains(&self, key: &[u8]) -> TrieResult<bool> {
-        TrieOps::contains(key, &self.root_hash, self.db.borrow(), &self.root)
+        TrieOps::contains(key, &self.root_hash, &self.db, &self.root)
     }
 
     fn verify_proof(
@@ -367,7 +325,7 @@ impl<R: BorrowMut<D>, D: DB> Trie<D> for EthTrie<R, D> {
 
 }
 
-impl<R: BorrowMut<D>, D: DB> TrieCommit<D> for EthTrie<R, D> {
+impl<D: DB> TrieCommit<D> for EthTrie<D> {
 
     fn commit(&mut self) -> TrieResult<H256> {
         let (root_hash, root) = TrieOps::commit(&self.root,  self.db.borrow_mut(), &mut self.gen_keys, &mut self.cache, &mut self.passing_keys)?;
@@ -421,15 +379,17 @@ mod tests {
         assert_eq!(None, v)
     }
 
-    fn corrupt_trie(db: &mut MemoryDB) -> (EthTrie<&mut MemoryDB, MemoryDB>, H256, H256) {
+    fn corrupt_trie(db: &mut MemoryDB) -> (EthTrie<&mut MemoryDB>, H256, H256) {
 
         // let corruptor_db = db.clone();
-        let mut trie = EthTrie::new(db);
-        trie.insert(b"test1-key", b"really-long-value1-to-prevent-inlining")
-            .unwrap();
-        trie.insert(b"test2-key", b"really-long-value2-to-prevent-inlining")
-            .unwrap();
-        let actual_root_hash = trie.commit().unwrap();
+        let actual_root_hash = {
+            let mut trie = EthTrie::new(db.borrow_mut());
+            trie.insert(b"test1-key", b"really-long-value1-to-prevent-inlining")
+                .unwrap();
+            trie.insert(b"test2-key", b"really-long-value2-to-prevent-inlining")
+                .unwrap();
+            trie.commit().unwrap()
+        };
 
         // Manually corrupt the database by removing a trie node
         // This is the hash for the leaf node for test2-key

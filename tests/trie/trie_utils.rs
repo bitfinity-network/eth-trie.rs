@@ -10,7 +10,7 @@ pub enum TrieAction {
 }
 
 // Check if trie content corresponds to the map
-pub fn check_trie(trie: &EthTrie<&mut MemoryDB, MemoryDB>, expected_data: &BTreeMap<Vec<u8>, Vec<u8>>) {
+pub fn check_trie(trie: &EthTrie<&mut MemoryDB>, expected_data: &BTreeMap<Vec<u8>, Vec<u8>>) {
     // Check that all values in map are accessible
     for (key, value) in expected_data {
         assert_eq!(trie.get(key).unwrap(), Some(value.to_owned()));
