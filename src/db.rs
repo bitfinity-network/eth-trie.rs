@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::Arc;
 use ethereum_types::H256;
+use parking_lot::RwLock;
 
 pub mod versioned;
 
@@ -39,6 +41,55 @@ pub trait DB {
     fn len(&self) -> Result<usize, Self::Error>;
 
     fn is_empty(&self) -> Result<bool, Self::Error>;
+
+}
+
+impl <D: DB> DB for Arc<RwLock<D>> {
+    type Error = D::Error;
+
+    fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
+        self.read().get(key)
+    }
+
+    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
+        self.write().insert(key, value)
+    }
+
+    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
+        self.write().remove(key)
+    }
+
+    fn len(&self) -> Result<usize, Self::Error> {
+        self.read().len()
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        self.read().is_empty()
+    }
+}
+
+impl <D: DB> DB for &mut D {
+    type Error = D::Error;
+
+    fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
+        D::get(*self, key)
+    }
+
+    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
+        D::insert(*self, key, value)
+    }
+
+    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
+        D::remove(*self, key)
+    }
+
+    fn len(&self) -> Result<usize, Self::Error> {
+        D::len(*self)
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        D::is_empty(*self)
+    }
 
 }
 
@@ -95,23 +146,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_memdb_get() {
-        let mut memdb = MemoryDB::new(true);
+    fn test_db_by_value() {
+        let db = MemoryDB::new(true);
+        assert_db_get(db);
+
+        let db = MemoryDB::new(true);
+        assert_db_remove(db);
+
+        let db = MemoryDB::new(true);
+        assert_db_len(db, true);
+    }
+
+    #[test]
+    fn test_db_by_reference() {
+        let mut db = MemoryDB::new(true);
+        assert_db_get(&mut db);
+        assert_db_remove(&mut db);
+        assert_db_len(&mut db, false);
+    }
+
+    #[test]
+    fn test_db_arc_by_ref() {
+        let mut db = Arc::new(RwLock::new(MemoryDB::new(true)));
+        assert_db_get(&mut db);
+        assert_db_remove(&mut db);
+        assert_db_len(&mut db, false);
+    }
+
+    #[test]
+    fn test_db_arc_by_value() {
+        let db = Arc::new(RwLock::new(MemoryDB::new(true)));
+        assert_db_get(db.clone());
+        assert_db_remove(db.clone());
+        assert_db_len(db.clone(), false);
+    }
+
+    fn assert_db_get(mut db: impl DB) {
         let key = H256::from_low_u64_be(123654);
-        memdb.insert(key, b"test-value".to_vec()).unwrap();
-        let v = memdb.get(&key).unwrap().unwrap();
+        db.insert(key, b"test-value".to_vec()).unwrap();
+        let v = db.get(&key).unwrap().unwrap();
 
         assert_eq!(v, b"test-value")
     }
 
-    #[test]
-    fn test_memdb_remove() {
-        let mut memdb = MemoryDB::new(true);
+    fn assert_db_remove(mut db: impl DB) {
         let key = H256::from_low_u64_be(3244);
-        memdb.insert(key, b"test".to_vec()).unwrap();
+        db.insert(key, b"test".to_vec()).unwrap();
 
-        memdb.remove(&key).unwrap();
-        let contains = memdb.get(&key).unwrap();
+        db.remove(&key).unwrap();
+        let contains = db.get(&key).unwrap();
         assert_eq!(contains, None)
+    }
+
+    fn assert_db_len(db: impl DB, empty: bool) {
+        if empty {
+            assert_eq!(db.len().unwrap(), 0);
+            assert!(db.is_empty().unwrap());
+        } else {
+            assert!(db.len().unwrap() > 0);
+            assert!(!db.is_empty().unwrap());
+        }
     }
 }
