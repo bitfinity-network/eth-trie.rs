@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use hashbrown::HashMap;
 use keccak_hash::H256;
 
@@ -63,8 +65,8 @@ impl DB for VersionedDB {
         Ok(self.storage.get(key).cloned())
     }
 
-    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
-        if let Some(_) = self.storage.insert(key.clone(), value) {
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
+        if let Some(_) = self.storage.insert(key.clone(), value.into_owned()) {
             self.deleted_at_version.remove(&key);
         }
         Ok(())
@@ -100,7 +102,7 @@ mod test {
 
         let key = H256::zero();
         let value = vec![1, 2, 3, 4];
-        db.insert(key, value.clone()).unwrap();
+        db.insert(key, value.clone().into()).unwrap();
         assert_eq!(db.get(&key).unwrap().unwrap(), value);
 
         db.remove(&key).unwrap();
@@ -130,7 +132,7 @@ mod test {
         let key = H256::zero();
         let value = vec![1, 2, 3, 4];
 
-        db.insert(key, value.clone()).unwrap();
+        db.insert(key, value.clone().into()).unwrap();
         assert_eq!(db.get(&key).unwrap().unwrap(), value);
         db.remove(&key).unwrap();
         assert!(db.get(&key).unwrap().is_some());
@@ -138,7 +140,7 @@ mod test {
         db.commit_version(None);
         assert!(db.get(&key).unwrap().is_some());
 
-        db.insert(key, value.clone()).unwrap();
+        db.insert(key, value.clone().into()).unwrap();
 
         db.commit_version(Some(2));
         assert!(db.get(&key).unwrap().is_some());

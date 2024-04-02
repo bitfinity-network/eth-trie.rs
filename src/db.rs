@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ pub trait DB {
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error>;
 
     /// Insert data into the cache.
-    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error>;
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error>;
 
     /// Remove data with given key.
     fn remove(&mut self, key: &H256) -> Result<(), Self::Error>;
@@ -35,7 +36,7 @@ impl <D: DB> DB for Arc<RwLock<D>> {
         self.read().get(key)
     }
 
-    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
         self.write().insert(key, value)
     }
 
@@ -59,7 +60,7 @@ impl <D: DB> DB for &mut D {
         D::get(*self, key)
     }
 
-    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
         D::insert(*self, key, value)
     }
 
@@ -104,8 +105,8 @@ impl DB for MemoryDB {
         }
     }
 
-    fn insert(&mut self, key: H256, value: Vec<u8>) -> Result<(), Self::Error> {
-        self.storage.insert(key, value);
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
+        self.storage.insert(key, value.into_owned());
         Ok(())
     }
 
@@ -167,7 +168,7 @@ mod tests {
 
     fn assert_db_get(mut db: impl DB) {
         let key = H256::from_low_u64_be(123654);
-        db.insert(key, b"test-value".to_vec()).unwrap();
+        db.insert(key, b"test-value".to_vec().into()).unwrap();
         let v = db.get(&key).unwrap().unwrap();
 
         assert_eq!(v, b"test-value")
@@ -175,7 +176,7 @@ mod tests {
 
     fn assert_db_remove(mut db: impl DB) {
         let key = H256::from_low_u64_be(3244);
-        db.insert(key, b"test".to_vec()).unwrap();
+        db.insert(key, b"test".to_vec().into()).unwrap();
 
         db.remove(&key).unwrap();
         let contains = db.get(&key).unwrap();

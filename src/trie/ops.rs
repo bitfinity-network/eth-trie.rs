@@ -149,7 +149,7 @@ impl TrieOps {
             let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
 
             if root_hash.eq(&hash) || node_encoded.len() >= HASHED_LENGTH {
-                proof_db.insert(hash, node_encoded).unwrap();
+                proof_db.insert(hash, node_encoded.into()).unwrap();
             }
         }
         let trie = EthTrie::with_root(&mut proof_db, root_hash);
@@ -535,7 +535,7 @@ impl TrieOps {
         };
 
         for (key, value) in cache.drain() {
-            db.insert(key, value).map_err(|e| TrieError::DB(e.to_string()))?;
+            db.insert(key, value.into()).map_err(|e| TrieError::DB(e.to_string()))?;
         }
 
         for key in passing_keys.drain() {
