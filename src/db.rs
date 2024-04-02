@@ -22,7 +22,7 @@ pub trait DB {
     /// Remove data with given key.
     fn remove(&mut self, key: &H256) -> Result<(), Self::Error>;
 
-    fn len(&self) -> Result<usize, Self::Error>;
+    fn len(&self) -> Result<u64, Self::Error>;
 
     fn is_empty(&self) -> Result<bool, Self::Error>;
 
@@ -43,7 +43,7 @@ impl <D: DB> DB for Arc<RwLock<D>> {
         self.write().remove(key)
     }
 
-    fn len(&self) -> Result<usize, Self::Error> {
+    fn len(&self) -> Result<u64, Self::Error> {
         self.read().len()
     }
 
@@ -67,7 +67,7 @@ impl <D: DB> DB for &mut D {
         D::remove(*self, key)
     }
 
-    fn len(&self) -> Result<usize, Self::Error> {
+    fn len(&self) -> Result<u64, Self::Error> {
         D::len(*self)
     }
 
@@ -116,8 +116,8 @@ impl DB for MemoryDB {
         Ok(())
     }
 
-    fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.storage.len())
+    fn len(&self) -> Result<u64, Self::Error> {
+        Ok(self.storage.len() as u64)
     }
 
     fn is_empty(&self) -> Result<bool, Self::Error> {

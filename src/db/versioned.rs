@@ -75,8 +75,8 @@ impl DB for VersionedDB {
         Ok(())
     }
 
-    fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.storage.len())
+    fn len(&self) -> Result<u64, Self::Error> {
+        Ok(self.storage.len() as u64)
     }
 
     fn is_empty(&self) -> Result<bool, Self::Error> {
