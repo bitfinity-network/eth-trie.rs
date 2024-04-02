@@ -15,6 +15,8 @@ use crate::errors::MemDBError;
 pub trait DB {
     type Error: Error;
 
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error>;
+
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error>;
 
     /// Insert data into the cache.
@@ -31,6 +33,10 @@ pub trait DB {
 
 impl <D: DB> DB for Arc<RwLock<D>> {
     type Error = D::Error;
+
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error> {
+        self.read().contains(key)
+    }
 
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
         self.read().get(key)
@@ -55,6 +61,10 @@ impl <D: DB> DB for Arc<RwLock<D>> {
 
 impl <D: DB> DB for &mut D {
     type Error = D::Error;
+
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error> {
+        D::contains(*self, key)
+    }
 
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
         D::get(*self, key)
@@ -96,6 +106,10 @@ impl MemoryDB {
 
 impl DB for MemoryDB {
     type Error = MemDBError;
+
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error> {
+        Ok(self.storage.contains_key(key))
+    }
 
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
         if let Some(value) = self.storage.get(key) {

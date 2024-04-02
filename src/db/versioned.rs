@@ -61,6 +61,10 @@ impl VersionedDB {
 impl DB for VersionedDB {
     type Error = MemDBError;
 
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error> {
+        Ok(self.storage.contains_key(key))
+    }
+    
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
         Ok(self.storage.get(key).cloned())
     }
