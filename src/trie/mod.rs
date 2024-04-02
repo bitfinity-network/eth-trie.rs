@@ -260,9 +260,9 @@ pub fn new(db: D) -> EthTrie<D> {
         }
     }
     
-    pub fn ref_with_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, &mut D, D> {
-        TrieRef::new(Node::from_hash(root_hash), root_hash, self.db.borrow_mut(), &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
-    }
+    // pub fn ref_with_root(&mut self, root_hash: H256) -> TrieRef<&mut TrieCache, &mut TrieKeys, &mut D, D> {
+    //     TrieRef::new(Node::from_hash(root_hash), root_hash, self.db.borrow_mut(), &mut self.cache, &mut self.passing_keys, &mut self.gen_keys)
+    // }
 
 }
     
@@ -338,12 +338,10 @@ impl<D: DB> TrieCommit<D> for EthTrie<D> {
 
 #[cfg(test)]
 mod tests {
-    use parking_lot::lock_api::RwLock;
     use rand::distributions::Alphanumeric;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng};
     use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
 
     use ethereum_types::H256;
     use keccak_hash::KECCAK_NULL_RLP;
@@ -818,10 +816,11 @@ mod tests {
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"key").unwrap(), None);
 
-        let trie_view = empty_trie.ref_with_root(new_root_hash);
+        let trie_view = EthTrie::with_root(&mut memdb, new_root_hash);
         assert_eq!(&trie_view.get(b"key").unwrap().unwrap(), b"val");
 
         // Previous trie was not modified
+        let mut empty_trie = EthTrie::new(&mut memdb);
         assert_eq!(empty_trie.get(b"key").unwrap(), None);
     }
 
@@ -840,13 +839,16 @@ mod tests {
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
 
-        let trie_view = empty_trie.ref_with_root(new_root_hash);
-        assert_eq!(
-            &trie_view.get(b"pretty-long-key").unwrap().unwrap(),
-            b"even-longer-val-to-go-more-than-32-bytes"
-        );
+        {
+            let trie_view = EthTrie::with_root(&mut memdb, new_root_hash);
+            assert_eq!(
+                &trie_view.get(b"pretty-long-key").unwrap().unwrap(),
+                b"even-longer-val-to-go-more-than-32-bytes"
+            );
+        }
 
         // Previous trie was not modified
+        let mut empty_trie = EthTrie::new(&mut memdb);
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
     }
 

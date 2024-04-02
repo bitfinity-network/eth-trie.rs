@@ -7,7 +7,6 @@ use parking_lot::RwLock;
 pub mod versioned;
 
 use crate::errors::MemDBError;
-use crate::trie::TrieCache;
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
