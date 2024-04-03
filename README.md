@@ -21,7 +21,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use eth_trie::MemoryDB;
-use eth_trie::{EthTrie, Trie, TrieError, TrieCommit};
+use eth_trie::{EthTrie, Trie, TrieCommit, TrieError, TrieMut};
 
 fn main() -> Result<(), TrieError> {
     let memdb = Arc::new(RwLock::new(MemoryDB::new(true)));
