@@ -8,7 +8,7 @@ mod trie;
 
 pub use db::{MemoryDB, DB, versioned::VersionedDB};
 pub use errors::{MemDBError, TrieError};
-pub use trie::{EthTrie, Trie, TrieCommit};
+pub use trie::{EthTrie, Trie, TrieMut, TrieCommit};
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]

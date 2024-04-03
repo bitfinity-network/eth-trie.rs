@@ -4,7 +4,7 @@ use keccak_hash::H256;
 
 use crate::{nibbles::Nibbles, node::Node, Trie, DB};
 
-use super::{ops::TrieOps, TrieCache, TrieIterator, TrieKeys, TrieResult};
+use super::{ops::TrieOps, TrieCache, TrieIterator, TrieKeys, TrieMut, TrieResult};
 
 #[derive(Debug)]
 pub struct TrieRef<C, GP, R, D: DB>
@@ -36,10 +36,6 @@ impl <C, GP, R, D: DB> TrieRef<C, GP, R, D> {
 
 impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> Trie<D> for TrieRef<C, GP, R, D> {
 
-    fn uncommitted_root(&self) -> H256 {
-        self.root_hash
-    }
-
     fn iter(&self) -> TrieIterator<D> {
         let nodes = vec![(self.root.clone()).into()];
         TrieIterator {
@@ -65,6 +61,10 @@ impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> 
     ) -> TrieResult<Option<Vec<u8>>> {
         TrieOps::verify_proof(root_hash, key, proof)
     }
+    
+}
+
+impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> TrieMut<D> for TrieRef<C, GP, R, D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, self.passing_keys.borrow_mut())?;

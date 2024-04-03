@@ -11,7 +11,6 @@ use crate::nibbles::Nibbles;
 use crate::node::Node;
 
 use self::ops::TrieOps;
-use self::trie_ref::TrieRef;
 
 pub type TrieResult<T> = Result<T, TrieError>;
 const HASHED_LENGTH: usize = 32;
@@ -23,7 +22,7 @@ pub trait Trie<D: DB> {
 
     /// Returns the temporary root hash of the trie.
     /// This root hash is not saved in the db until commit is called.
-    fn uncommitted_root(&self) -> H256;
+    // fn uncommitted_root(&self) -> H256;
 
     /// Returns an iterator over the trie.
     fn iter(&self) -> TrieIterator<D>;
@@ -41,6 +40,10 @@ pub trait Trie<D: DB> {
         key: &[u8],
         proof: Vec<Vec<u8>>,
     ) -> TrieResult<Option<Vec<u8>>>;
+
+}
+
+pub trait TrieMut<D: DB> {
 
     /// Inserts value into trie and modifies it if it exists
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()>;
@@ -268,10 +271,6 @@ pub fn new(db: D) -> EthTrie<D> {
     
 impl<D: DB> Trie<D> for EthTrie<D> {
 
-    fn uncommitted_root(&self) -> H256 {
-        self.root_hash
-    }
-
     fn iter(&self) -> TrieIterator<D> {
         let nodes = vec![(self.root.clone()).into()];
         TrieIterator {
@@ -297,6 +296,10 @@ impl<D: DB> Trie<D> for EthTrie<D> {
     ) -> TrieResult<Option<Vec<u8>>> {
         TrieOps::verify_proof(root_hash, key, proof)
     }
+
+}
+
+impl<D: DB> TrieMut<D> for EthTrie<D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, &mut self.passing_keys)?;

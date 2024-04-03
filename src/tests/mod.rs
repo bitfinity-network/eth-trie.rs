@@ -5,7 +5,7 @@ mod trie_tests {
     use rand::Rng;
 
     use crate::db::MemoryDB;
-    use crate::trie::{EthTrie, Trie, TrieCommit};
+    use crate::trie::{EthTrie, Trie, TrieCommit, TrieMut};
 
     fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
         let expected_hash: H256 = hash.parse().unwrap();
