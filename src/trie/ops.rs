@@ -6,7 +6,7 @@ use keccak_hash::keccak;
 use parking_lot::RwLock;
 use rlp::{Prototype, Rlp, RlpStream};
 
-use crate::db::{MemoryDB, DB};
+use crate::db::{DBMut, MemoryDB, DB};
 use crate::errors::TrieError;
 use crate::nibbles::Nibbles;
 use crate::node::{empty_children, BranchNode, Node};
@@ -49,7 +49,7 @@ impl TrieOps {
         Ok(Self::get_at(root_hash, db,  root, path, 0)?.map_or(false, |_| true))
     }
 
-    pub fn insert<D: DB>(key: &[u8], value: &[u8], root_hash: &H256,
+    pub fn insert<D: DBMut>(key: &[u8], value: &[u8], root_hash: &H256,
         db: &D,
         root: &Node,
         passing_keys: &mut HashSet<H256>
@@ -79,7 +79,7 @@ impl TrieOps {
         }
     }
 
-    pub fn remove<D: DB>(key: &[u8], root_hash: &H256,
+    pub fn remove<D: DBMut>(key: &[u8], root_hash: &H256,
         db: &D,
         root: &Node,
         passing_keys: &mut HashSet<H256>,
@@ -209,7 +209,7 @@ impl TrieOps {
         }
     }
 
-    fn insert_at<D: DB>(
+    fn insert_at<D: DBMut>(
         root_hash: &H256,
         n: &Node,
         db: &D,
@@ -315,7 +315,7 @@ impl TrieOps {
         }
     }
 
-    fn delete_at<D: DB>(
+    fn delete_at<D: DBMut>(
         root_hash: &H256,
         old_node: &Node,
         db: &D,
@@ -518,7 +518,7 @@ impl TrieOps {
         }
     }
 
-    pub fn commit<D: DB>(
+    pub fn commit<D: DBMut>(
         root: &Node,
         db: &mut D,
         gen_keys: &mut HashSet<H256>, 

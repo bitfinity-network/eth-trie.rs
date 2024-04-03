@@ -2,7 +2,7 @@ use std::borrow::BorrowMut;
 
 use keccak_hash::H256;
 
-use crate::{nibbles::Nibbles, node::Node, Trie, DB};
+use crate::{db::DBMut, nibbles::Nibbles, node::Node, Trie, DB};
 
 use super::{ops::TrieOps, TrieCache, TrieIterator, TrieKeys, TrieMut, TrieResult};
 
@@ -64,7 +64,7 @@ impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> 
     
 }
 
-impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DB> TrieMut<D> for TrieRef<C, GP, R, D> {
+impl <C: BorrowMut<TrieCache>, GP: BorrowMut<TrieKeys>, R: BorrowMut<D>, D: DBMut> TrieMut<D> for TrieRef<C, GP, R, D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, self.passing_keys.borrow_mut())?;

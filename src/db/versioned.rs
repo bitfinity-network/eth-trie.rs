@@ -5,6 +5,8 @@ use keccak_hash::H256;
 
 use crate::{MemDBError, DB};
 
+use super::DBMut;
+
 /// A database that stores a fixed number of versions of the data.
 pub struct VersionedDB {
     current_version: u64,
@@ -69,6 +71,18 @@ impl DB for VersionedDB {
         Ok(self.storage.get(key).cloned())
     }
 
+    fn len(&self) -> Result<u64, Self::Error> {
+        Ok(self.storage.len() as u64)
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        Ok(self.storage.is_empty())
+    }
+
+}
+
+impl DBMut for VersionedDB {
+
     fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
         if let Some(_) = self.storage.insert(key.clone(), value.into_owned()) {
             self.deleted_at_version.remove(&key);
@@ -79,14 +93,6 @@ impl DB for VersionedDB {
     fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
         self.deleted_at_version.insert(*key, self.current_version);
         Ok(())
-    }
-
-    fn len(&self) -> Result<u64, Self::Error> {
-        Ok(self.storage.len() as u64)
-    }
-
-    fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.storage.is_empty())
     }
 
 }

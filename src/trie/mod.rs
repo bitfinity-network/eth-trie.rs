@@ -5,7 +5,7 @@ use hashbrown::{HashMap, HashSet};
 use keccak_hash::KECCAK_NULL_RLP;
 use log::warn;
 
-use crate::db::DB;
+use crate::db::{DBMut, DB};
 use crate::errors::TrieError;
 use crate::nibbles::Nibbles;
 use crate::node::Node;
@@ -299,7 +299,7 @@ impl<D: DB> Trie<D> for EthTrie<D> {
 
 }
 
-impl<D: DB> TrieMut<D> for EthTrie<D> {
+impl<D: DBMut> TrieMut<D> for EthTrie<D> {
 
     fn insert(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
         let node = TrieOps::insert(key, value, &self.root_hash, self.db.borrow_mut(), &mut self.root, &mut self.passing_keys)?;
@@ -328,7 +328,7 @@ impl<D: DB> TrieMut<D> for EthTrie<D> {
 
 }
 
-impl<D: DB> TrieCommit<D> for EthTrie<D> {
+impl<D: DBMut> TrieCommit<D> for EthTrie<D> {
 
     fn commit(&mut self) -> TrieResult<H256> {
         let (root_hash, root) = TrieOps::commit(&self.root,  self.db.borrow_mut(), &mut self.gen_keys, &mut self.cache, &mut self.passing_keys)?;
@@ -838,7 +838,7 @@ mod tests {
         .unwrap();
         let new_root_hash = trie.commit().unwrap();
 
-        let mut empty_trie = EthTrie::new(&mut memdb);
+        let empty_trie = EthTrie::new(&memdb);
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"pretty-long-key").unwrap(), None);
 

@@ -19,16 +19,18 @@ pub trait DB {
 
     fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error>;
 
+    fn len(&self) -> Result<u64, Self::Error>;
+
+    fn is_empty(&self) -> Result<bool, Self::Error>;
+
+}
+
+pub trait DBMut: DB {
     /// Insert data into the cache.
     fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error>;
 
     /// Remove data with given key.
     fn remove(&mut self, key: &H256) -> Result<(), Self::Error>;
-
-    fn len(&self) -> Result<u64, Self::Error>;
-
-    fn is_empty(&self) -> Result<bool, Self::Error>;
-
 }
 
 impl <D: DB> DB for Arc<RwLock<D>> {
@@ -42,14 +44,6 @@ impl <D: DB> DB for Arc<RwLock<D>> {
         self.read().get(key)
     }
 
-    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
-        self.write().insert(key, value)
-    }
-
-    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
-        self.write().remove(key)
-    }
-
     fn len(&self) -> Result<u64, Self::Error> {
         self.read().len()
     }
@@ -57,6 +51,38 @@ impl <D: DB> DB for Arc<RwLock<D>> {
     fn is_empty(&self) -> Result<bool, Self::Error> {
         self.read().is_empty()
     }
+}
+
+impl <D: DBMut> DBMut for Arc<RwLock<D>> {
+
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
+        self.write().insert(key, value)
+    }
+
+    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
+        self.write().remove(key)
+    }
+}
+
+impl <D: DB> DB for &D {
+    type Error = D::Error;
+
+    fn contains(&self, key: &H256) -> Result<bool, Self::Error> {
+        D::contains(*self, key)
+    }
+
+    fn get(&self, key: &H256) -> Result<Option<Vec<u8>>, Self::Error> {
+        D::get(*self, key)
+    }
+
+    fn len(&self) -> Result<u64, Self::Error> {
+        D::len(*self)
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        D::is_empty(*self)
+    }
+
 }
 
 impl <D: DB> DB for &mut D {
@@ -70,20 +96,24 @@ impl <D: DB> DB for &mut D {
         D::get(*self, key)
     }
 
-    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
-        D::insert(*self, key, value)
-    }
-
-    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
-        D::remove(*self, key)
-    }
-
     fn len(&self) -> Result<u64, Self::Error> {
         D::len(*self)
     }
 
     fn is_empty(&self) -> Result<bool, Self::Error> {
         D::is_empty(*self)
+    }
+
+}
+
+impl <D: DBMut> DBMut for &mut D {
+
+    fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
+        D::insert(*self, key, value)
+    }
+
+    fn remove(&mut self, key: &H256) -> Result<(), Self::Error> {
+        D::remove(*self, key)
     }
 
 }
@@ -119,6 +149,17 @@ impl DB for MemoryDB {
         }
     }
 
+    fn len(&self) -> Result<u64, Self::Error> {
+        Ok(self.storage.len() as u64)
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        Ok(self.storage.is_empty())
+    }
+}
+
+impl DBMut for MemoryDB {
+
     fn insert(&mut self, key: H256, value: Cow<[u8]>) -> Result<(), Self::Error> {
         self.storage.insert(key, value.into_owned());
         Ok(())
@@ -129,14 +170,6 @@ impl DB for MemoryDB {
             self.storage.remove(key);
         }
         Ok(())
-    }
-
-    fn len(&self) -> Result<u64, Self::Error> {
-        Ok(self.storage.len() as u64)
-    }
-
-    fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.storage.is_empty())
     }
 }
 
@@ -180,7 +213,7 @@ mod tests {
         assert_db_len(db.clone(), false);
     }
 
-    fn assert_db_get(mut db: impl DB) {
+    fn assert_db_get(mut db: impl DBMut) {
         let key = H256::from_low_u64_be(123654);
         db.insert(key, b"test-value".to_vec().into()).unwrap();
         let v = db.get(&key).unwrap().unwrap();
@@ -188,7 +221,7 @@ mod tests {
         assert_eq!(v, b"test-value")
     }
 
-    fn assert_db_remove(mut db: impl DB) {
+    fn assert_db_remove(mut db: impl DBMut) {
         let key = H256::from_low_u64_be(3244);
         db.insert(key, b"test".to_vec().into()).unwrap();
 
